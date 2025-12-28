@@ -1,11 +1,14 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/abdul-hamid-achik/job-queue/internal/job"
 	"github.com/abdul-hamid-achik/job-queue/testutil"
@@ -355,5 +358,246 @@ func TestAPIHandler_RegisterRoutes(t *testing.T) {
 		if w.Code == http.StatusNotFound {
 			t.Errorf("route %s %s not registered", tt.method, tt.path)
 		}
+	}
+}
+
+func TestAPIHandler_GetQueueDepth_MissingName(t *testing.T) {
+	h := newTestHandler()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/queues//depth", nil)
+	req.SetPathValue("name", "")
+	w := httptest.NewRecorder()
+
+	h.GetQueueDepth(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestAPIHandler_DeleteJob_MissingID(t *testing.T) {
+	h := newTestHandler()
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/jobs/", nil)
+	req.SetPathValue("id", "")
+	w := httptest.NewRecorder()
+
+	h.DeleteJob(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestAPIHandler_CreateJob_WithDelay(t *testing.T) {
+	h := newTestHandler()
+
+	body := `{
+		"type": "scheduled.task",
+		"payload": {"data": "test"},
+		"delay": "1h"
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.CreateJob(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("expected status %d, got %d. Body: %s", http.StatusCreated, w.Code, w.Body.String())
+	}
+
+	var resp job.Job
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.ScheduledAt == nil {
+		t.Error("expected job to have scheduled_at set for delayed job")
+	}
+}
+
+func TestAPIHandler_CreateJob_WithScheduledAt(t *testing.T) {
+	h := newTestHandler()
+
+	futureTime := time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
+	body := `{
+		"type": "scheduled.task",
+		"payload": {"data": "test"},
+		"scheduled_at": "` + futureTime + `"
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.CreateJob(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("expected status %d, got %d. Body: %s", http.StatusCreated, w.Code, w.Body.String())
+	}
+
+	var resp job.Job
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.ScheduledAt == nil {
+		t.Error("expected job to have scheduled_at set")
+	}
+}
+
+func TestAPIHandler_CreateJob_WithMetadata(t *testing.T) {
+	h := newTestHandler()
+
+	body := `{
+		"type": "email.send",
+		"payload": {"to": "test@example.com"},
+		"metadata": {
+			"source": "api",
+			"user_id": "123"
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.CreateJob(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("expected status %d, got %d. Body: %s", http.StatusCreated, w.Code, w.Body.String())
+	}
+
+	var resp job.Job
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Metadata == nil {
+		t.Fatal("expected metadata to be set")
+	}
+	if resp.Metadata["source"] != "api" {
+		t.Errorf("expected metadata source 'api', got '%s'", resp.Metadata["source"])
+	}
+	if resp.Metadata["user_id"] != "123" {
+		t.Errorf("expected metadata user_id '123', got '%s'", resp.Metadata["user_id"])
+	}
+}
+
+func TestAPIHandler_Ready_BrokerDown(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	// Simulate broker being down
+	mb.PingFunc = func(ctx context.Context) error {
+		return errors.New("connection refused")
+	}
+
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, nil, nil, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	w := httptest.NewRecorder()
+
+	h.Ready(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, w.Code)
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp["error"] != "redis not ready" {
+		t.Errorf("expected error 'redis not ready', got '%s'", resp["error"])
+	}
+}
+
+func TestAPIHandler_CreateJob_EnqueueError(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	mb.EnqueueFunc = func(ctx context.Context, j *job.Job) error {
+		return errors.New("redis connection lost")
+	}
+
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, nil, nil, logger)
+
+	body := `{"type": "email.send", "payload": {"to": "test@example.com"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.CreateJob(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp["error"] != "failed to enqueue job" {
+		t.Errorf("expected error 'failed to enqueue job', got '%s'", resp["error"])
+	}
+}
+
+func TestAPIHandler_GetQueueDepth_Error(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	mb.GetQueueDepthFunc = func(ctx context.Context, queue string) (int64, error) {
+		return 0, errors.New("redis error")
+	}
+
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, nil, nil, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/queues/default/depth", nil)
+	req.SetPathValue("name", "default")
+	w := httptest.NewRecorder()
+
+	h.GetQueueDepth(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+func TestAPIHandler_DeleteJob_Error(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	mb.DeleteJobFunc = func(ctx context.Context, jobID string) error {
+		return errors.New("redis error")
+	}
+
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, nil, nil, logger)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/jobs/test-id", nil)
+	req.SetPathValue("id", "test-id")
+	w := httptest.NewRecorder()
+
+	h.DeleteJob(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+func TestAPIHandler_GetJob_Error(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	mb.GetJobFunc = func(ctx context.Context, jobID string) (*job.Job, error) {
+		return nil, errors.New("unexpected error")
+	}
+
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, nil, nil, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/test-id", nil)
+	req.SetPathValue("id", "test-id")
+	w := httptest.NewRecorder()
+
+	h.GetJob(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
 	}
 }

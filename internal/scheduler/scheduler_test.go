@@ -2,12 +2,14 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/abdul-hamid-achik/job-queue/internal/job"
 	"github.com/abdul-hamid-achik/job-queue/testutil"
+	"github.com/rs/zerolog"
 )
 
 func TestNew(t *testing.T) {
@@ -265,5 +267,199 @@ func TestScheduler_MultipleDelayedJobs(t *testing.T) {
 	}
 	if len(mb.QueuedJobs()) != 2 {
 		t.Errorf("expected 2 queued jobs, got %d", len(mb.QueuedJobs()))
+	}
+}
+
+func TestScheduler_ProcessDelayedJobs_Error(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	s := New(mb, WithSchedulerPollInterval(50*time.Millisecond))
+
+	// Simulate error getting delayed jobs
+	expectedErr := errors.New("redis connection error")
+	mb.GetDelayedJobsFunc = func(ctx context.Context, until time.Time, limit int64) ([]*job.Job, error) {
+		return nil, expectedErr
+	}
+
+	err := s.processDelayedJobs(context.Background())
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+	if err != expectedErr {
+		t.Errorf("expected error %v, got %v", expectedErr, err)
+	}
+}
+
+func TestScheduler_ProcessDelayedJobs_MoveError(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	s := New(mb, WithSchedulerPollInterval(50*time.Millisecond))
+
+	// Schedule a job in the past
+	j := testutil.NewTestJob()
+	pastTime := time.Now().Add(-1 * time.Minute)
+	mb.Schedule(context.Background(), j, pastTime)
+
+	// Simulate error moving job
+	mb.MoveDelayedToQueueFunc = func(ctx context.Context, job *job.Job) error {
+		return errors.New("move failed")
+	}
+
+	// Should not return error, just log it and continue
+	err := s.processDelayedJobs(context.Background())
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Job should still be in delayed queue since move failed
+	if len(mb.DelayedJobs()) != 1 {
+		t.Errorf("expected job to remain in delayed queue, got %d jobs", len(mb.DelayedJobs()))
+	}
+}
+
+func TestScheduler_ProcessStaleJobs_GetPendingError(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	s := New(mb,
+		WithSchedulerPollInterval(50*time.Millisecond),
+		WithStaleJobTimeout(1*time.Minute),
+	)
+
+	// Simulate error getting pending jobs
+	mb.GetPendingJobsFunc = func(ctx context.Context, queue string, idleTime time.Duration) ([]*job.Job, error) {
+		return nil, errors.New("redis error")
+	}
+
+	// Should not return error, just log and continue
+	err := s.processStaleJobs(context.Background())
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestScheduler_ProcessStaleJobs_RequeueError(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	s := New(mb,
+		WithSchedulerPollInterval(50*time.Millisecond),
+		WithStaleJobTimeout(1*time.Minute),
+	)
+
+	staleJob := testutil.NewTestJob()
+	staleJob.State = job.StateProcessing
+
+	mb.GetPendingJobsFunc = func(ctx context.Context, queue string, idleTime time.Duration) ([]*job.Job, error) {
+		if queue == "default" {
+			return []*job.Job{staleJob}, nil
+		}
+		return nil, nil
+	}
+
+	mb.RequeueStaleJobFunc = func(ctx context.Context, j *job.Job) error {
+		return errors.New("requeue failed")
+	}
+
+	// Should not return error, just log and continue
+	err := s.processStaleJobs(context.Background())
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestScheduler_StopBeforeStart(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	s := New(mb, WithSchedulerPollInterval(50*time.Millisecond))
+
+	// Should not panic when stopping before starting
+	s.Stop()
+
+	if s.IsRunning() {
+		t.Error("scheduler should not be running")
+	}
+}
+
+func TestScheduler_WithLogger(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	logger := zerolog.Nop()
+
+	s := New(mb, WithSchedulerLogger(logger))
+
+	if s.logger.GetLevel() != zerolog.Disabled {
+		t.Error("expected nop logger to be set")
+	}
+}
+
+func TestScheduler_BatchSizeLimit(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	s := New(mb,
+		WithSchedulerPollInterval(50*time.Millisecond),
+		WithBatchSize(2), // Only process 2 at a time
+	)
+
+	// Schedule 5 jobs in the past
+	pastTime := time.Now().Add(-1 * time.Minute)
+	for i := 0; i < 5; i++ {
+		j := testutil.NewTestJob()
+		mb.Schedule(context.Background(), j, pastTime)
+	}
+
+	if len(mb.DelayedJobs()) != 5 {
+		t.Fatalf("expected 5 delayed jobs, got %d", len(mb.DelayedJobs()))
+	}
+
+	// First process should only move 2 (batch size limit)
+	err := s.processDelayedJobs(context.Background())
+	if err != nil {
+		t.Fatalf("processDelayedJobs failed: %v", err)
+	}
+
+	// Should have moved 2 jobs
+	if len(mb.QueuedJobs()) != 2 {
+		t.Errorf("expected 2 queued jobs after first batch, got %d", len(mb.QueuedJobs()))
+	}
+	if len(mb.DelayedJobs()) != 3 {
+		t.Errorf("expected 3 delayed jobs remaining, got %d", len(mb.DelayedJobs()))
+	}
+
+	// Process again
+	err = s.processDelayedJobs(context.Background())
+	if err != nil {
+		t.Fatalf("processDelayedJobs failed: %v", err)
+	}
+
+	// Should have moved 2 more
+	if len(mb.QueuedJobs()) != 4 {
+		t.Errorf("expected 4 queued jobs after second batch, got %d", len(mb.QueuedJobs()))
+	}
+}
+
+func TestScheduler_ContextCancellation(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	s := New(mb, WithSchedulerPollInterval(50*time.Millisecond))
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		s.Start(ctx)
+		close(done)
+	}()
+
+	// Let it run briefly
+	time.Sleep(100 * time.Millisecond)
+
+	if !s.IsRunning() {
+		t.Error("expected scheduler to be running")
+	}
+
+	// Cancel context
+	cancel()
+
+	// Should stop within reasonable time
+	select {
+	case <-done:
+		// Good
+	case <-time.After(2 * time.Second):
+		t.Error("scheduler did not stop after context cancellation")
+	}
+
+	if s.IsRunning() {
+		t.Error("scheduler should not be running after context cancellation")
 	}
 }
