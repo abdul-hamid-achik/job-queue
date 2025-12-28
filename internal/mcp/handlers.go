@@ -18,7 +18,6 @@ func (s *Server) handleEnqueueJob(ctx context.Context, request mcp.CallToolReque
 		return mcp.NewToolResultError("job type is required"), nil
 	}
 
-	// Build options
 	opts := []job.Option{}
 
 	if queue := request.GetString("queue", ""); queue != "" {
@@ -36,20 +35,17 @@ func (s *Server) handleEnqueueJob(ctx context.Context, request mcp.CallToolReque
 		}
 	}
 
-	// Get payload from raw arguments
 	var payload interface{}
 	args := request.GetArguments()
 	if p, ok := args["payload"]; ok {
 		payload = p
 	}
 
-	// Create job
 	j, err := job.NewWithOptions(jobType, payload, opts...)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to create job: %v", err)), nil
 	}
 
-	// Enqueue
 	if err := s.broker.Enqueue(ctx, j); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to enqueue job: %v", err)), nil
 	}
@@ -188,13 +184,11 @@ func (s *Server) handleRetryDLQJob(ctx context.Context, request mcp.CallToolRequ
 		return mcp.NewToolResultError(fmt.Sprintf("failed to get DLQ job: %v", err)), nil
 	}
 
-	// Convert back to job and enqueue
 	j := dlj.ToJob()
 	if err := s.broker.Enqueue(ctx, j); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to requeue job: %v", err)), nil
 	}
 
-	// Mark as requeued (ignore error)
 	_ = s.dlqRepo.MarkRequeued(ctx, id)
 
 	output, _ := json.MarshalIndent(j, "", "  ")
@@ -299,7 +293,6 @@ func (s *Server) handleHealthCheck(ctx context.Context, request mcp.CallToolRequ
 	}
 	checks := status["checks"].(map[string]string)
 
-	// Check Redis
 	if err := s.broker.Ping(ctx); err != nil {
 		checks["redis"] = fmt.Sprintf("error: %v", err)
 		status["status"] = "unhealthy"

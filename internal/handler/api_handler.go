@@ -111,7 +111,6 @@ func (h *APIHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build job options
 	opts := []job.Option{}
 
 	if req.Queue != "" {
@@ -140,14 +139,12 @@ func (h *APIHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		opts = append(opts, job.WithMetadata(k, v))
 	}
 
-	// Create job
 	j, err := job.NewWithOptions(req.Type, req.Payload, opts...)
 	if err != nil {
 		h.errorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	// Enqueue
 	if err := h.broker.Enqueue(r.Context(), j); err != nil {
 		h.logger.Error().Err(err).Str("job_id", j.ID).Msg("failed to enqueue job")
 		h.errorResponse(w, http.StatusInternalServerError, "failed to enqueue job")
@@ -197,7 +194,6 @@ func (h *APIHandler) DeleteJob(w http.ResponseWriter, r *http.Request) {
 
 // ListQueues returns all queues with their depths.
 func (h *APIHandler) ListQueues(w http.ResponseWriter, r *http.Request) {
-	// For now, return common queues
 	queues := []string{"default", "critical", "low"}
 	result := make([]map[string]interface{}, 0, len(queues))
 
@@ -293,7 +289,6 @@ func (h *APIHandler) RetryDLQJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get the DLQ job
 	dlj, err := h.dlqRepo.GetByID(r.Context(), id)
 	if err == repository.ErrNotFound {
 		h.errorResponse(w, http.StatusNotFound, "job not found in DLQ")
@@ -304,16 +299,13 @@ func (h *APIHandler) RetryDLQJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert back to a job
 	j := dlj.ToJob()
 
-	// Re-enqueue
 	if err := h.broker.Enqueue(r.Context(), j); err != nil {
 		h.errorResponse(w, http.StatusInternalServerError, "failed to requeue job")
 		return
 	}
 
-	// Mark as requeued
 	if err := h.dlqRepo.MarkRequeued(r.Context(), id); err != nil {
 		h.logger.Error().Err(err).Msg("failed to mark DLQ job as requeued")
 	}

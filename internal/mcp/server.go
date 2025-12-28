@@ -23,14 +23,12 @@ func NewServer(b broker.Broker, execRepo *repository.ExecutionRepository, dlqRep
 		dlqRepo:  dlqRepo,
 	}
 
-	// Create MCP server
 	s.mcpServer = server.NewMCPServer(
 		"job-queue",
 		"0.1.0",
 		server.WithToolCapabilities(true),
 	)
 
-	// Register tools
 	s.registerTools()
 
 	return s
@@ -38,7 +36,6 @@ func NewServer(b broker.Broker, execRepo *repository.ExecutionRepository, dlqRep
 
 // registerTools registers all MCP tools.
 func (s *Server) registerTools() {
-	// Job operations
 	s.mcpServer.AddTool(mcp.NewTool("enqueue_job",
 		mcp.WithDescription("Create and enqueue a new background job"),
 		mcp.WithString("type",
@@ -78,7 +75,6 @@ func (s *Server) registerTools() {
 		),
 	), s.handleDeleteJob)
 
-	// Queue operations
 	s.mcpServer.AddTool(mcp.NewTool("list_queues",
 		mcp.WithDescription("List all queues with their current depths"),
 	), s.handleListQueues)
@@ -91,7 +87,6 @@ func (s *Server) registerTools() {
 		),
 	), s.handleGetQueueDepth)
 
-	// DLQ operations
 	s.mcpServer.AddTool(mcp.NewTool("list_dlq",
 		mcp.WithDescription("List jobs in the dead letter queue"),
 		mcp.WithNumber("limit",
@@ -132,7 +127,6 @@ func (s *Server) registerTools() {
 		),
 	), s.handleDeleteDLQJob)
 
-	// Execution history
 	s.mcpServer.AddTool(mcp.NewTool("list_executions",
 		mcp.WithDescription("List job execution history"),
 		mcp.WithNumber("limit",
@@ -157,12 +151,10 @@ func (s *Server) registerTools() {
 		),
 	), s.handleGetJobExecutions)
 
-	// Stats
 	s.mcpServer.AddTool(mcp.NewTool("get_stats",
 		mcp.WithDescription("Get overall job execution statistics for the last 24 hours"),
 	), s.handleGetStats)
 
-	// Health
 	s.mcpServer.AddTool(mcp.NewTool("health_check",
 		mcp.WithDescription("Check if the job queue system is healthy and all dependencies are ready"),
 	), s.handleHealthCheck)

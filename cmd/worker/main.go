@@ -17,21 +17,17 @@ import (
 )
 
 func main() {
-	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to load config")
 	}
 
-	// Setup logger
 	logger := setupLogger(cfg.Log)
-
 	logger.Info().
 		Int("concurrency", cfg.Worker.Concurrency).
 		Strs("queues", cfg.Worker.Queues).
 		Msg("starting worker")
 
-	// Create Redis client
 	redisOpts, err := redis.ParseURL(cfg.Redis.URL)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("failed to parse Redis URL")
@@ -39,31 +35,20 @@ func main() {
 	redisClient := redis.NewClient(redisOpts)
 	defer redisClient.Close()
 
-	// Ping Redis to verify connection
 	if err := redisClient.Ping(context.Background()).Err(); err != nil {
 		logger.Fatal().Err(err).Msg("failed to connect to Redis")
 	}
 	logger.Info().Msg("connected to Redis")
 
-	// Create broker
 	b := broker.NewRedisStreamsBroker(redisClient)
-
-	// Create handler registry
 	registry := worker.NewRegistry()
 
-	// Register your handlers here
-	// Example:
-	// registry.MustRegister("email.send", handlers.SendEmail)
-	// registry.MustRegister("image.resize", handlers.ResizeImage)
-
-	// Add middleware
 	registry.Use(
 		middleware.RecoveryMiddleware(logger),
 		middleware.LoggingMiddleware(logger),
 		middleware.TimeoutMiddleware(cfg.Job.DefaultTimeout),
 	)
 
-	// Create worker pool
 	pool := worker.NewPool(
 		b,
 		registry,
@@ -74,21 +59,17 @@ func main() {
 		worker.WithPoolLogger(logger),
 	)
 
-	// Setup graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Handle shutdown signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start pool in goroutine
 	errChan := make(chan error, 1)
 	go func() {
 		errChan <- pool.Start(ctx)
 	}()
 
-	// Wait for shutdown signal or error
 	select {
 	case sig := <-sigChan:
 		logger.Info().Str("signal", sig.String()).Msg("received shutdown signal")
@@ -98,7 +79,6 @@ func main() {
 		}
 	}
 
-	// Graceful shutdown
 	logger.Info().Msg("initiating graceful shutdown")
 	cancel()
 
@@ -114,14 +94,12 @@ func main() {
 }
 
 func setupLogger(cfg config.LogConfig) zerolog.Logger {
-	// Set log level
 	level, err := zerolog.ParseLevel(cfg.Level)
 	if err != nil {
 		level = zerolog.InfoLevel
 	}
 	zerolog.SetGlobalLevel(level)
 
-	// Configure output format
 	var logger zerolog.Logger
 	if cfg.Format == "console" {
 		logger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339}).
