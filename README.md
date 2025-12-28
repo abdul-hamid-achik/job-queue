@@ -16,6 +16,8 @@ A production-grade background job processing system built with Go, Redis Streams
 - **Cron Scheduling** - Recurring jobs with cron expressions and timezone support
 - **Execution History** - Track job outcomes in PostgreSQL
 - **HTTP API** - RESTful endpoints for job management and monitoring
+- **OpenAPI Spec** - Full API documentation for client generation
+- **MCP Server** - Model Context Protocol support for LLM integration
 - **Middleware** - Composable middleware for logging, timeouts, and custom behavior
 
 ## Architecture
@@ -205,6 +207,83 @@ curl -X POST http://localhost:8080/api/v1/dlq/{job_id}/retry
 
 # Health check
 curl http://localhost:8080/health
+
+# Get OpenAPI spec
+curl http://localhost:8080/api/v1/openapi.yaml
+```
+
+## OpenAPI & Client Generation
+
+The API is fully documented with OpenAPI 3.1. You can:
+
+1. **View the spec**: `curl http://localhost:8080/api/v1/openapi.yaml`
+2. **Use with Swagger UI**: Point any OpenAPI viewer to the spec URL
+3. **Generate clients**: Use openapi-generator for any language
+
+```bash
+# Generate TypeScript client
+npx @openapitools/openapi-generator-cli generate \
+  -i http://localhost:8080/api/v1/openapi.yaml \
+  -g typescript-fetch \
+  -o ./client
+
+# Generate Python client
+openapi-generator generate \
+  -i api/openapi.yaml \
+  -g python \
+  -o ./python-client
+```
+
+The spec is also available at `api/openapi.yaml` in the repository.
+
+## MCP Server (LLM Integration)
+
+This project includes an MCP (Model Context Protocol) server, allowing LLMs like Claude to interact with the job queue directly.
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `enqueue_job` | Create and enqueue a new job |
+| `get_job` | Get job details by ID |
+| `delete_job` | Delete/cancel a job |
+| `list_queues` | List all queues with depths |
+| `get_queue_depth` | Get depth of specific queue |
+| `list_dlq` | List dead letter queue jobs |
+| `get_dlq_job` | Get specific DLQ job |
+| `retry_dlq_job` | Retry a job from DLQ |
+| `delete_dlq_job` | Remove job from DLQ |
+| `list_executions` | List execution history |
+| `get_job_executions` | Get executions for specific job |
+| `get_stats` | Get overall statistics |
+| `health_check` | Check system health |
+
+### Claude Desktop Configuration
+
+Add to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "job-queue": {
+      "command": "/path/to/job-queue/bin/mcp",
+      "env": {
+        "REDIS_URL": "redis://localhost:6379",
+        "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/jobqueue?sslmode=disable"
+      }
+    }
+  }
+}
+```
+
+### Build and Run
+
+```bash
+# Build MCP server
+task build:mcp
+
+# Run directly (for testing)
+task run:mcp
 ```
 
 ## Configuration
@@ -230,11 +309,15 @@ See [.env.example](.env.example) for a complete list.
 
 ```
 job-queue/
+├── api/
+│   └── openapi.yaml     # OpenAPI 3.1 specification
 ├── cmd/
 │   ├── server/          # HTTP API server
 │   ├── worker/          # Background worker process
-│   └── scheduler/       # Delayed job scheduler
+│   ├── scheduler/       # Delayed job scheduler
+│   └── mcp/             # MCP server for LLM integration
 ├── internal/
+│   ├── api/             # Embedded OpenAPI spec
 │   ├── broker/          # Redis Streams queue implementation
 │   ├── job/             # Job types, state machine, priorities
 │   ├── worker/          # Worker pool and handler registry
@@ -242,6 +325,7 @@ job-queue/
 │   ├── repository/      # PostgreSQL repositories (DLQ, history)
 │   ├── scheduler/       # Delayed jobs and cron scheduling
 │   ├── handler/         # HTTP API handlers
+│   ├── mcp/             # MCP server implementation
 │   └── config/          # Configuration loading
 ├── migrations/          # PostgreSQL migrations
 ├── testutil/            # Test helpers and mocks

@@ -12,6 +12,10 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// OpenAPISpec holds the embedded OpenAPI specification.
+// This is set during initialization from the api/openapi.yaml file.
+var OpenAPISpec []byte
+
 // APIHandler handles HTTP requests for the management API.
 type APIHandler struct {
 	broker   broker.Broker
@@ -62,6 +66,9 @@ func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Stats
 	mux.HandleFunc("GET /api/v1/stats", h.GetStats)
+
+	// OpenAPI spec
+	mux.HandleFunc("GET /api/v1/openapi.yaml", h.OpenAPISpec)
 }
 
 // Health returns a simple health check response.
@@ -410,4 +417,15 @@ func (h *APIHandler) jsonResponse(w http.ResponseWriter, status int, data interf
 
 func (h *APIHandler) errorResponse(w http.ResponseWriter, status int, message string) {
 	h.jsonResponse(w, status, map[string]string{"error": message})
+}
+
+// OpenAPISpec serves the OpenAPI specification.
+func (h *APIHandler) OpenAPISpec(w http.ResponseWriter, r *http.Request) {
+	if len(OpenAPISpec) == 0 {
+		h.errorResponse(w, http.StatusNotFound, "OpenAPI spec not available")
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-yaml")
+	w.WriteHeader(http.StatusOK)
+	w.Write(OpenAPISpec)
 }

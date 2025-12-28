@@ -16,6 +16,7 @@ tasks:
       - go build -o {{.BINARY_DIR}}/worker ./cmd/worker
       - go build -o {{.BINARY_DIR}}/api ./cmd/server
       - go build -o {{.BINARY_DIR}}/scheduler ./cmd/scheduler
+      - go build -o {{.BINARY_DIR}}/mcp ./cmd/mcp
 
   build:worker:
     desc: Build worker binary
@@ -31,6 +32,11 @@ tasks:
     desc: Build scheduler binary
     cmds:
       - go build -o {{.BINARY_DIR}}/scheduler ./cmd/scheduler
+
+  build:mcp:
+    desc: Build MCP server binary
+    cmds:
+      - go build -o {{.BINARY_DIR}}/mcp ./cmd/mcp
 
   # Test tasks
   test:
@@ -138,6 +144,11 @@ tasks:
     desc: Run scheduler locally
     cmds:
       - go run ./cmd/scheduler
+
+  run:mcp:
+    desc: Run MCP server locally (stdio)
+    cmds:
+      - go run ./cmd/mcp
 
   # Setup task
   setup:

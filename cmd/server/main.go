@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/abdul-hamid-achik/job-queue/internal/api"
 	"github.com/abdul-hamid-achik/job-queue/internal/broker"
 	"github.com/abdul-hamid-achik/job-queue/internal/config"
 	"github.com/abdul-hamid-achik/job-queue/internal/handler"
@@ -64,6 +65,9 @@ func main() {
 	b := broker.NewRedisStreamsBroker(redisClient)
 	execRepo := repository.NewExecutionRepository(dbPool)
 	dlqRepo := repository.NewDLQRepository(dbPool)
+
+	// Load OpenAPI spec
+	handler.OpenAPISpec = api.OpenAPISpec
 
 	// Create API handler
 	apiHandler := handler.NewAPIHandler(b, execRepo, dlqRepo, logger)

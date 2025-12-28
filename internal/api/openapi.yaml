@@ -1,0 +1,849 @@
+openapi: 3.1.0
+info:
+  title: Job Queue API
+  description: |
+    RESTful API for managing background jobs, queues, and execution history.
+    
+    ## Features
+    - Create and manage background jobs
+    - Priority-based queue processing
+    - Dead letter queue for failed jobs
+    - Execution history and statistics
+    
+    ## Authentication
+    Currently no authentication is required. Add your own auth middleware as needed.
+  version: 0.1.0
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  contact:
+    name: Abdul Hamid Achik
+    url: https://github.com/abdul-hamid-achik/job-queue
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+tags:
+  - name: Health
+    description: Health and readiness checks
+  - name: Jobs
+    description: Job management operations
+  - name: Queues
+    description: Queue information and statistics
+  - name: DLQ
+    description: Dead letter queue operations
+  - name: Executions
+    description: Job execution history
+  - name: Stats
+    description: Overall statistics
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Returns OK if the service is running
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: ok
+
+  /ready:
+    get:
+      tags: [Health]
+      summary: Readiness check
+      description: Returns OK if all dependencies (Redis, PostgreSQL) are ready
+      operationId: readinessCheck
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: ready
+        '503':
+          description: Service not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: redis not ready
+
+  /api/v1/jobs:
+    post:
+      tags: [Jobs]
+      summary: Create a job
+      description: Create and enqueue a new background job
+      operationId: createJob
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJobRequest'
+            examples:
+              simple:
+                summary: Simple job
+                value:
+                  type: email.send
+                  payload:
+                    to: user@example.com
+                    subject: Welcome!
+              with_options:
+                summary: Job with options
+                value:
+                  type: payment.process
+                  payload:
+                    order_id: ord_123
+                    amount: 9999
+                  queue: critical
+                  priority: high
+                  max_retries: 5
+                  timeout: 2m
+              delayed:
+                summary: Delayed job
+                value:
+                  type: reminder.send
+                  payload:
+                    user_id: usr_456
+                  delay: 1h
+              scheduled:
+                summary: Scheduled job
+                value:
+                  type: report.generate
+                  payload:
+                    report_type: daily
+                  scheduled_at: "2024-12-25T09:00:00Z"
+      responses:
+        '201':
+          description: Job created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: job type is required
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/jobs/{id}:
+    get:
+      tags: [Jobs]
+      summary: Get a job
+      description: Retrieve job details by ID
+      operationId: getJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Job found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: job not found
+
+    delete:
+      tags: [Jobs]
+      summary: Delete a job
+      description: Cancel and delete a job by ID
+      operationId: deleteJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Job deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+              example:
+                status: deleted
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/queues:
+    get:
+      tags: [Queues]
+      summary: List queues
+      description: List all queues with their current depths
+      operationId: listQueues
+      responses:
+        '200':
+          description: List of queues
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QueueInfo'
+              example:
+                - name: critical
+                  depth: 5
+                - name: default
+                  depth: 42
+                - name: low
+                  depth: 128
+
+  /api/v1/queues/{name}/depth:
+    get:
+      tags: [Queues]
+      summary: Get queue depth
+      description: Get the number of jobs in a specific queue
+      operationId: getQueueDepth
+      parameters:
+        - $ref: '#/components/parameters/QueueName'
+      responses:
+        '200':
+          description: Queue depth
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueDepth'
+              example:
+                queue: default
+                depth: 42
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/dlq:
+    get:
+      tags: [DLQ]
+      summary: List DLQ jobs
+      description: List jobs in the dead letter queue
+      operationId: listDLQ
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: type
+          in: query
+          description: Filter by job type
+          schema:
+            type: string
+          example: email.send
+        - name: queue
+          in: query
+          description: Filter by queue
+          schema:
+            type: string
+          example: default
+      responses:
+        '200':
+          description: List of DLQ jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeadLetterJob'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/dlq/{id}:
+    get:
+      tags: [DLQ]
+      summary: Get DLQ job
+      description: Get a specific job from the dead letter queue
+      operationId: getDLQJob
+      parameters:
+        - $ref: '#/components/parameters/DLQId'
+      responses:
+        '200':
+          description: DLQ job found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadLetterJob'
+        '404':
+          description: Job not found in DLQ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: job not found in DLQ
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      tags: [DLQ]
+      summary: Delete DLQ job
+      description: Permanently remove a job from the dead letter queue
+      operationId: deleteDLQJob
+      parameters:
+        - $ref: '#/components/parameters/DLQId'
+      responses:
+        '200':
+          description: Job deleted from DLQ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+              example:
+                status: deleted
+        '404':
+          description: Job not found in DLQ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/dlq/{id}/retry:
+    post:
+      tags: [DLQ]
+      summary: Retry DLQ job
+      description: Move a job from DLQ back to the work queue for retry
+      operationId: retryDLQJob
+      parameters:
+        - $ref: '#/components/parameters/DLQId'
+      responses:
+        '200':
+          description: Job requeued successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '404':
+          description: Job not found in DLQ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/executions:
+    get:
+      tags: [Executions]
+      summary: List executions
+      description: List job execution history
+      operationId: listExecutions
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: type
+          in: query
+          description: Filter by job type
+          schema:
+            type: string
+        - name: state
+          in: query
+          description: Filter by execution state
+          schema:
+            type: string
+            enum: [pending, queued, processing, completed, failed, dead]
+      responses:
+        '200':
+          description: List of executions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/JobExecution'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/executions/{jobID}:
+    get:
+      tags: [Executions]
+      summary: Get job executions
+      description: Get execution history for a specific job
+      operationId: getJobExecutions
+      parameters:
+        - name: jobID
+          in: path
+          required: true
+          description: Job ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Job execution history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/JobExecution'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/stats:
+    get:
+      tags: [Stats]
+      summary: Get statistics
+      description: Get overall job execution statistics for the last 24 hours
+      operationId: getStats
+      responses:
+        '200':
+          description: Statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stats'
+              example:
+                executions_24h:
+                  total: 1523
+                  completed: 1450
+                  failed: 68
+                  dead: 5
+                  avg_duration_ms: 245.5
+                dead_letter_count: 12
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/openapi.yaml:
+    get:
+      tags: [Health]
+      summary: OpenAPI specification
+      description: Returns the OpenAPI specification for this API
+      operationId: getOpenAPISpec
+      responses:
+        '200':
+          description: OpenAPI specification
+          content:
+            application/x-yaml:
+              schema:
+                type: string
+
+components:
+  parameters:
+    JobId:
+      name: id
+      in: path
+      required: true
+      description: Job ID (UUID)
+      schema:
+        type: string
+        format: uuid
+      example: 550e8400-e29b-41d4-a716-446655440000
+
+    DLQId:
+      name: id
+      in: path
+      required: true
+      description: DLQ record ID
+      schema:
+        type: string
+      example: 1
+
+    QueueName:
+      name: name
+      in: path
+      required: true
+      description: Queue name
+      schema:
+        type: string
+      example: default
+
+    Limit:
+      name: limit
+      in: query
+      description: Maximum number of items to return
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 100
+      example: 50
+
+    Offset:
+      name: offset
+      in: query
+      description: Number of items to skip
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+      example: 0
+
+  schemas:
+    Job:
+      type: object
+      required:
+        - id
+        - type
+        - queue
+        - priority
+        - state
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique job identifier
+          example: 550e8400-e29b-41d4-a716-446655440000
+        type:
+          type: string
+          description: Job type identifier
+          example: email.send
+        payload:
+          type: object
+          description: Job payload data
+          additionalProperties: true
+          example:
+            to: user@example.com
+            subject: Welcome!
+        queue:
+          type: string
+          description: Queue name
+          default: default
+          example: default
+        priority:
+          type: string
+          enum: [critical, high, medium, low]
+          default: medium
+          description: Job priority
+          example: high
+        max_retries:
+          type: integer
+          minimum: 0
+          default: 3
+          description: Maximum retry attempts
+          example: 3
+        retry_count:
+          type: integer
+          minimum: 0
+          description: Current retry count
+          example: 0
+        timeout:
+          type: integer
+          description: Job timeout in nanoseconds
+          example: 300000000000
+        scheduled_at:
+          type: string
+          format: date-time
+          description: Scheduled execution time (for delayed jobs)
+          example: "2024-12-25T09:00:00Z"
+        created_at:
+          type: string
+          format: date-time
+          description: Job creation time
+          example: "2024-01-15T10:30:00Z"
+        started_at:
+          type: string
+          format: date-time
+          description: Job start time
+          example: "2024-01-15T10:30:01Z"
+        completed_at:
+          type: string
+          format: date-time
+          description: Job completion time
+          example: "2024-01-15T10:30:02Z"
+        last_error:
+          type: string
+          description: Last error message (if failed)
+          example: "connection timeout"
+        state:
+          type: string
+          enum: [pending, queued, scheduled, processing, completed, failed, dead]
+          description: Current job state
+          example: completed
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: Custom metadata
+          example:
+            source: api
+            user_id: usr_123
+
+    CreateJobRequest:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          description: Job type identifier
+          example: email.send
+        payload:
+          type: object
+          description: Job payload data
+          additionalProperties: true
+        queue:
+          type: string
+          description: Queue name
+          default: default
+        priority:
+          type: string
+          enum: [critical, high, medium, low]
+          default: medium
+        max_retries:
+          type: integer
+          minimum: 0
+          default: 3
+        timeout:
+          type: string
+          description: Job timeout (Go duration format)
+          example: "5m"
+        scheduled_at:
+          type: string
+          format: date-time
+          description: Scheduled execution time
+        delay:
+          type: string
+          description: Delay before execution (Go duration format)
+          example: "1h"
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+
+    DeadLetterJob:
+      type: object
+      properties:
+        id:
+          type: string
+          description: DLQ record ID
+        job_id:
+          type: string
+          format: uuid
+          description: Original job ID
+        job_type:
+          type: string
+          description: Job type
+        queue:
+          type: string
+          description: Original queue
+        payload:
+          type: object
+          additionalProperties: true
+        priority:
+          type: string
+        error_message:
+          type: string
+          description: Error that caused the failure
+        stack_trace:
+          type: string
+          description: Stack trace (if available)
+        retry_count:
+          type: integer
+          description: Number of retries attempted
+        max_retries:
+          type: integer
+        original_created_at:
+          type: string
+          format: date-time
+        failed_at:
+          type: string
+          format: date-time
+        requeued_at:
+          type: string
+          format: date-time
+          description: Time when job was requeued (if retried)
+        requeue_count:
+          type: integer
+          description: Number of times requeued from DLQ
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+
+    JobExecution:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Execution record ID
+        job_id:
+          type: string
+          format: uuid
+        job_type:
+          type: string
+        queue:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+        state:
+          type: string
+          enum: [pending, queued, processing, completed, failed, dead]
+        attempt:
+          type: integer
+          description: Attempt number (1-based)
+        max_retries:
+          type: integer
+        error_message:
+          type: string
+        stack_trace:
+          type: string
+        worker_id:
+          type: string
+          description: ID of worker that processed this execution
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        duration_ms:
+          type: integer
+          description: Execution duration in milliseconds
+        created_at:
+          type: string
+          format: date-time
+
+    ExecutionStats:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total executions
+        completed:
+          type: integer
+          description: Successful executions
+        failed:
+          type: integer
+          description: Failed executions (may retry)
+        dead:
+          type: integer
+          description: Dead executions (exhausted retries)
+        avg_duration_ms:
+          type: number
+          format: float
+          description: Average execution duration
+
+    Stats:
+      type: object
+      properties:
+        executions_24h:
+          $ref: '#/components/schemas/ExecutionStats'
+        dead_letter_count:
+          type: integer
+          description: Current DLQ size
+
+    QueueInfo:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Queue name
+        depth:
+          type: integer
+          description: Number of jobs in queue
+
+    QueueDepth:
+      type: object
+      properties:
+        queue:
+          type: string
+          description: Queue name
+        depth:
+          type: integer
+          description: Number of jobs in queue
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, ready]
+
+    StatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: deleted
+
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+          example: job not found

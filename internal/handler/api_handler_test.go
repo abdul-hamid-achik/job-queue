@@ -601,3 +601,44 @@ func TestAPIHandler_GetJob_Error(t *testing.T) {
 		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
 	}
 }
+
+func TestAPIHandler_OpenAPISpec(t *testing.T) {
+	h := newTestHandler()
+
+	// Set up the OpenAPI spec
+	OpenAPISpec = []byte("openapi: 3.1.0\ninfo:\n  title: Test")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/openapi.yaml", nil)
+	w := httptest.NewRecorder()
+
+	h.OpenAPISpec(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "application/x-yaml" {
+		t.Errorf("expected content-type 'application/x-yaml', got '%s'", contentType)
+	}
+
+	if !strings.Contains(w.Body.String(), "openapi: 3.1.0") {
+		t.Error("expected response to contain OpenAPI spec")
+	}
+}
+
+func TestAPIHandler_OpenAPISpec_NotAvailable(t *testing.T) {
+	h := newTestHandler()
+
+	// Clear the OpenAPI spec
+	OpenAPISpec = nil
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/openapi.yaml", nil)
+	w := httptest.NewRecorder()
+
+	h.OpenAPISpec(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status %d, got %d", http.StatusNotFound, w.Code)
+	}
+}
