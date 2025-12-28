@@ -1,0 +1,56 @@
+# Git
+.git
+.gitignore
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+bin/
+dist/
+tmp/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test files and coverage
+*_test.go
+testutil/
+coverage.out
+coverage.html
+*.test
+
+# Documentation (not needed in container)
+docs/
+*.md
+!go.mod
+!go.sum
+
+# Development files
+Makefile
+docker-compose.yml
+.dockerignore
+Dockerfile
+
+# Examples (not needed in production)
+examples/
+
+# Claude/AI config
+.claude/
+
+# Migrations handled separately
+# migrations/

@@ -1,0 +1,151 @@
+version: '3'
+
+vars:
+  BINARY_DIR: bin
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  # Build tasks
+  build:
+    desc: Build all binaries
+    cmds:
+      - go build -o {{.BINARY_DIR}}/worker ./cmd/worker
+      - go build -o {{.BINARY_DIR}}/api ./cmd/server
+      - go build -o {{.BINARY_DIR}}/scheduler ./cmd/scheduler
+
+  build:worker:
+    desc: Build worker binary
+    cmds:
+      - go build -o {{.BINARY_DIR}}/worker ./cmd/worker
+
+  build:api:
+    desc: Build API binary
+    cmds:
+      - go build -o {{.BINARY_DIR}}/api ./cmd/server
+
+  build:scheduler:
+    desc: Build scheduler binary
+    cmds:
+      - go build -o {{.BINARY_DIR}}/scheduler ./cmd/scheduler
+
+  # Test tasks
+  test:
+    desc: Run all tests
+    cmds:
+      - go test -v -race ./...
+
+  test:unit:
+    desc: Run unit tests only
+    cmds:
+      - go test -v -race -short ./...
+
+  test:integration:
+    desc: Run integration tests (requires Docker)
+    cmds:
+      - go test -v -race -run Integration ./...
+
+  test:coverage:
+    desc: Run tests with coverage report
+    cmds:
+      - go test -v -race -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
+      - echo "Coverage report generated - coverage.html"
+
+  # Docker tasks
+  docker:up:
+    desc: Start all Docker services
+    cmds:
+      - docker compose up -d
+
+  docker:down:
+    desc: Stop all Docker services
+    cmds:
+      - docker compose down
+
+  docker:infra:
+    desc: Start only Redis and PostgreSQL
+    cmds:
+      - docker compose up -d redis db
+
+  docker:build:
+    desc: Build Docker images
+    cmds:
+      - docker compose build
+
+  docker:logs:
+    desc: View Docker logs
+    cmds:
+      - docker compose logs -f
+
+  # Database tasks
+  migrate:
+    desc: Run database migrations
+    requires:
+      vars: [DATABASE_URL]
+    cmds:
+      - migrate -path migrations -database "$DATABASE_URL" up
+
+  migrate:down:
+    desc: Rollback last migration
+    requires:
+      vars: [DATABASE_URL]
+    cmds:
+      - migrate -path migrations -database "$DATABASE_URL" down 1
+
+  migrate:create:
+    desc: Create a new migration (usage - task migrate:create -- name)
+    cmds:
+      - migrate create -ext sql -dir migrations -seq {{.CLI_ARGS}}
+
+  # Development tasks
+  lint:
+    desc: Run linter
+    cmds:
+      - golangci-lint run ./...
+
+  fmt:
+    desc: Format code
+    cmds:
+      - go fmt ./...
+
+  tidy:
+    desc: Tidy dependencies
+    cmds:
+      - go mod tidy
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf {{.BINARY_DIR}}
+      - rm -f coverage.out coverage.html
+
+  # Run tasks
+  run:worker:
+    desc: Run worker locally
+    cmds:
+      - go run ./cmd/worker
+
+  run:api:
+    desc: Run API server locally
+    cmds:
+      - go run ./cmd/server
+
+  run:scheduler:
+    desc: Run scheduler locally
+    cmds:
+      - go run ./cmd/scheduler
+
+  # Setup task
+  setup:
+    desc: Setup development environment
+    cmds:
+      - task tidy
+      - task docker:infra
+      - echo "Waiting for services to start..."
+      - sleep 3
+      - task migrate
+      - echo "Setup complete!"
