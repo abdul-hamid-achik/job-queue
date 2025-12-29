@@ -97,8 +97,8 @@ task docker:up
 package main
 
 import (
-    "github.com/abdul-hamid-achik/job-queue/internal/job"
-    "github.com/abdul-hamid-achik/job-queue/internal/broker"
+    "github.com/abdul-hamid-achik/job-queue/pkg/job"
+    "github.com/abdul-hamid-achik/job-queue/pkg/broker"
     "github.com/redis/go-redis/v9"
 )
 
@@ -129,10 +129,10 @@ package main
 
 import (
     "context"
-    "github.com/abdul-hamid-achik/job-queue/internal/worker"
-    "github.com/abdul-hamid-achik/job-queue/internal/broker"
-    "github.com/abdul-hamid-achik/job-queue/internal/job"
-    "github.com/abdul-hamid-achik/job-queue/internal/middleware"
+    "github.com/abdul-hamid-achik/job-queue/pkg/worker"
+    "github.com/abdul-hamid-achik/job-queue/pkg/broker"
+    "github.com/abdul-hamid-achik/job-queue/pkg/job"
+    "github.com/abdul-hamid-achik/job-queue/pkg/middleware"
 )
 
 func main() {
@@ -316,7 +316,7 @@ job-queue/
 │   ├── worker/          # Background worker process
 │   ├── scheduler/       # Delayed job scheduler
 │   └── mcp/             # MCP server for LLM integration
-├── internal/
+├── pkg/
 │   ├── api/             # Embedded OpenAPI spec
 │   ├── broker/          # Redis Streams queue implementation
 │   ├── job/             # Job types, state machine, priorities

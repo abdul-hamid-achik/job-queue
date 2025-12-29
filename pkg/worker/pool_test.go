@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abdul-hamid-achik/job-queue/internal/job"
-	"github.com/abdul-hamid-achik/job-queue/internal/worker"
+	"github.com/abdul-hamid-achik/job-queue/pkg/job"
+	"github.com/abdul-hamid-achik/job-queue/pkg/worker"
 	"github.com/abdul-hamid-achik/job-queue/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

@@ -1,8 +1,8 @@
 package mcp
 
 import (
-	"github.com/abdul-hamid-achik/job-queue/internal/broker"
-	"github.com/abdul-hamid-achik/job-queue/internal/repository"
+	"github.com/abdul-hamid-achik/job-queue/pkg/broker"
+	"github.com/abdul-hamid-achik/job-queue/pkg/repository"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )

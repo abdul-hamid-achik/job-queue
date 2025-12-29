@@ -5,10 +5,10 @@ import (
 	"log"
 	"os"
 
-	"github.com/abdul-hamid-achik/job-queue/internal/broker"
-	"github.com/abdul-hamid-achik/job-queue/internal/config"
-	"github.com/abdul-hamid-achik/job-queue/internal/mcp"
-	"github.com/abdul-hamid-achik/job-queue/internal/repository"
+	"github.com/abdul-hamid-achik/job-queue/pkg/broker"
+	"github.com/abdul-hamid-achik/job-queue/pkg/config"
+	"github.com/abdul-hamid-achik/job-queue/pkg/mcp"
+	"github.com/abdul-hamid-achik/job-queue/pkg/repository"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )

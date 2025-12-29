@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/abdul-hamid-achik/job-queue/internal/job"
-	"github.com/abdul-hamid-achik/job-queue/internal/worker"
+	"github.com/abdul-hamid-achik/job-queue/pkg/job"
+	"github.com/abdul-hamid-achik/job-queue/pkg/worker"
 )
 
 func TimeoutMiddleware(defaultTimeout time.Duration) worker.Middleware {

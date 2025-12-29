@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abdul-hamid-achik/job-queue/internal/job"
+	"github.com/abdul-hamid-achik/job-queue/pkg/job"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

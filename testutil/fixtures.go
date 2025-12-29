@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/abdul-hamid-achik/job-queue/internal/job"
+	"github.com/abdul-hamid-achik/job-queue/pkg/job"
 	"github.com/google/uuid"
 )
 

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/abdul-hamid-achik/job-queue/internal/job"
-	"github.com/abdul-hamid-achik/job-queue/internal/repository"
+	"github.com/abdul-hamid-achik/job-queue/pkg/job"
+	"github.com/abdul-hamid-achik/job-queue/pkg/repository"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 

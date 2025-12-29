@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/abdul-hamid-achik/job-queue/internal/broker"
-	"github.com/abdul-hamid-achik/job-queue/internal/job"
-	"github.com/abdul-hamid-achik/job-queue/internal/repository"
+	"github.com/abdul-hamid-achik/job-queue/pkg/broker"
+	"github.com/abdul-hamid-achik/job-queue/pkg/job"
+	"github.com/abdul-hamid-achik/job-queue/pkg/repository"
 	"github.com/rs/zerolog"
 )
 

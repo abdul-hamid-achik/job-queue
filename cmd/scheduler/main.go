@@ -7,9 +7,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/abdul-hamid-achik/job-queue/internal/broker"
-	"github.com/abdul-hamid-achik/job-queue/internal/config"
-	"github.com/abdul-hamid-achik/job-queue/internal/scheduler"
+	"github.com/abdul-hamid-achik/job-queue/pkg/broker"
+	"github.com/abdul-hamid-achik/job-queue/pkg/config"
+	"github.com/abdul-hamid-achik/job-queue/pkg/scheduler"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"

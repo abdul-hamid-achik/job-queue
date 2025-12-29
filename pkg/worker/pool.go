@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/abdul-hamid-achik/job-queue/internal/broker"
+	"github.com/abdul-hamid-achik/job-queue/pkg/broker"
 	"github.com/rs/zerolog"
 )
 
