@@ -9,6 +9,7 @@ import (
 	"github.com/abdul-hamid-achik/job-queue/pkg/job"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog"
 )
 
 const (
@@ -27,6 +28,7 @@ type RedisStreamsBroker struct {
 	groupName string
 	blockTime time.Duration
 	claimIdle time.Duration
+	logger    zerolog.Logger
 }
 
 type RedisStreamsBrokerOption func(*RedisStreamsBroker)
@@ -55,6 +57,12 @@ func WithClaimIdleTime(d time.Duration) RedisStreamsBrokerOption {
 	}
 }
 
+func WithLogger(logger zerolog.Logger) RedisStreamsBrokerOption {
+	return func(b *RedisStreamsBroker) {
+		b.logger = logger
+	}
+}
+
 func NewRedisStreamsBroker(client redis.UniversalClient, opts ...RedisStreamsBrokerOption) *RedisStreamsBroker {
 	b := &RedisStreamsBroker{
 		client:    client,
@@ -62,12 +70,14 @@ func NewRedisStreamsBroker(client redis.UniversalClient, opts ...RedisStreamsBro
 		groupName: keyPrefixConsumerGrp,
 		blockTime: defaultBlockTimeout,
 		claimIdle: defaultClaimMinIdle,
+		logger:    zerolog.Nop(),
 	}
 
 	for _, opt := range opts {
 		opt(b)
 	}
 
+	b.logger = b.logger.With().Str("worker_id", b.workerID).Logger()
 	return b
 }
 
@@ -82,7 +92,11 @@ func (b *RedisStreamsBroker) jobKey(jobID string) string {
 func (b *RedisStreamsBroker) ensureConsumerGroup(ctx context.Context, stream string) error {
 	err := b.client.XGroupCreateMkStream(ctx, stream, b.groupName, "0").Err()
 	if err != nil && !isGroupExistsError(err) {
+		b.logger.Error().Err(err).Str("stream", stream).Str("group", b.groupName).Msg("failed to create consumer group")
 		return fmt.Errorf("failed to create consumer group: %w", err)
+	}
+	if err == nil {
+		b.logger.Info().Str("stream", stream).Str("group", b.groupName).Msg("consumer group created")
 	}
 	return nil
 }
@@ -101,10 +115,15 @@ func isNoGroupError(err error) bool {
 
 func (b *RedisStreamsBroker) Enqueue(ctx context.Context, j *job.Job) error {
 	if err := j.Validate(); err != nil {
+		b.logger.Debug().Str("job_id", j.ID).Msg("job validation failed")
 		return ErrInvalidJob
 	}
 
 	if j.IsDelayed() {
+		b.logger.Debug().
+			Str("job_id", j.ID).
+			Time("scheduled_at", *j.ScheduledAt).
+			Msg("job is delayed, scheduling")
 		return b.Schedule(ctx, j, *j.ScheduledAt)
 	}
 
@@ -115,22 +134,39 @@ func (b *RedisStreamsBroker) Enqueue(ctx context.Context, j *job.Job) error {
 		return fmt.Errorf("failed to marshal job: %w", err)
 	}
 
+	streamKey := b.streamKey(j.Queue, j.Priority)
+
+	// Ensure consumer group exists BEFORE adding to stream
+	// This prevents race conditions where messages are added but group doesn't exist yet
+	if err := b.ensureConsumerGroup(ctx, streamKey); err != nil {
+		b.logger.Error().Err(err).Str("stream", streamKey).Msg("failed to ensure consumer group")
+		return err
+	}
+
 	jobKey := b.jobKey(j.ID)
 	if err := b.client.Set(ctx, jobKey, jobData, 0).Err(); err != nil {
+		b.logger.Error().Err(err).Str("job_id", j.ID).Msg("failed to store job data")
 		return fmt.Errorf("%w: %v", ErrEnqueueFailed, err)
 	}
 
-	streamKey := b.streamKey(j.Queue, j.Priority)
 	if err := b.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: streamKey,
 		Values: map[string]interface{}{
 			"job_id": j.ID,
 		},
 	}).Err(); err != nil {
+		b.logger.Error().Err(err).Str("job_id", j.ID).Str("stream", streamKey).Msg("failed to add to stream")
 		return fmt.Errorf("%w: %v", ErrEnqueueFailed, err)
 	}
 
-	return b.ensureConsumerGroup(ctx, streamKey)
+	b.logger.Debug().
+		Str("job_id", j.ID).
+		Str("job_type", j.Type).
+		Str("queue", j.Queue).
+		Str("priority", j.Priority.String()).
+		Msg("job enqueued")
+
+	return nil
 }
 
 func (b *RedisStreamsBroker) Dequeue(ctx context.Context, queues []string, timeout time.Duration) (*job.Job, error) {
@@ -202,11 +238,13 @@ func (b *RedisStreamsBroker) Dequeue(ctx context.Context, queues []string, timeo
 func (b *RedisStreamsBroker) processDequeueResult(ctx context.Context, stream string, msg redis.XMessage) (*job.Job, error) {
 	jobID, ok := msg.Values["job_id"].(string)
 	if !ok {
+		b.logger.Error().Str("stream", stream).Str("message_id", msg.ID).Msg("invalid message format: missing job_id")
 		return nil, fmt.Errorf("invalid message format: missing job_id")
 	}
 
 	j, err := b.GetJob(ctx, jobID)
 	if err != nil {
+		b.logger.Error().Err(err).Str("job_id", jobID).Msg("failed to get job during dequeue")
 		return nil, err
 	}
 
@@ -229,21 +267,31 @@ func (b *RedisStreamsBroker) processDequeueResult(ctx context.Context, stream st
 		return nil, fmt.Errorf("failed to update job state: %w", err)
 	}
 
+	b.logger.Debug().
+		Str("job_id", j.ID).
+		Str("job_type", j.Type).
+		Str("queue", j.Queue).
+		Str("stream", stream).
+		Msg("job dequeued")
+
 	return j, nil
 }
 
 func (b *RedisStreamsBroker) Ack(ctx context.Context, j *job.Job) error {
 	stream, ok := j.Metadata["stream"]
 	if !ok {
+		b.logger.Error().Str("job_id", j.ID).Msg("ack failed: missing stream metadata")
 		return fmt.Errorf("%w: missing stream metadata", ErrAckFailed)
 	}
 
 	messageID, ok := j.Metadata["message_id"]
 	if !ok {
+		b.logger.Error().Str("job_id", j.ID).Msg("ack failed: missing message_id metadata")
 		return fmt.Errorf("%w: missing message_id metadata", ErrAckFailed)
 	}
 
 	if err := b.client.XAck(ctx, stream, b.groupName, messageID).Err(); err != nil {
+		b.logger.Error().Err(err).Str("job_id", j.ID).Str("stream", stream).Msg("failed to ack message")
 		return fmt.Errorf("%w: %v", ErrAckFailed, err)
 	}
 
@@ -262,17 +310,24 @@ func (b *RedisStreamsBroker) Ack(ctx context.Context, j *job.Job) error {
 		return fmt.Errorf("failed to update job: %w", err)
 	}
 
+	b.logger.Debug().
+		Str("job_id", j.ID).
+		Str("job_type", j.Type).
+		Msg("job acknowledged")
+
 	return nil
 }
 
 func (b *RedisStreamsBroker) Nack(ctx context.Context, j *job.Job, jobErr error) error {
 	stream, ok := j.Metadata["stream"]
 	if !ok {
+		b.logger.Error().Str("job_id", j.ID).Msg("nack failed: missing stream metadata")
 		return fmt.Errorf("missing stream metadata")
 	}
 
 	messageID, ok := j.Metadata["message_id"]
 	if !ok {
+		b.logger.Error().Str("job_id", j.ID).Msg("nack failed: missing message_id metadata")
 		return fmt.Errorf("missing message_id metadata")
 	}
 
@@ -285,12 +340,29 @@ func (b *RedisStreamsBroker) Nack(ctx context.Context, j *job.Job, jobErr error)
 		backoffSeconds := 1 << j.RetryCount
 		retryAt := time.Now().Add(time.Duration(backoffSeconds) * time.Second)
 		j.State = job.StateRetrying
+
+		b.logger.Warn().
+			Str("job_id", j.ID).
+			Str("job_type", j.Type).
+			Int("retry_count", j.RetryCount).
+			Int("max_retries", j.MaxRetries).
+			Time("retry_at", retryAt).
+			Err(jobErr).
+			Msg("job failed, scheduling retry")
+
 		return b.Schedule(ctx, j, retryAt)
 	}
 
 	if err := j.MarkDead(); err != nil {
 		return err
 	}
+
+	b.logger.Error().
+		Str("job_id", j.ID).
+		Str("job_type", j.Type).
+		Int("retry_count", j.RetryCount).
+		Err(jobErr).
+		Msg("job exhausted retries, marked dead")
 
 	jobData, err := json.Marshal(j)
 	if err != nil {

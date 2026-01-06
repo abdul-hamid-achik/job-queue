@@ -12,7 +12,7 @@ info:
     
     ## Authentication
     Currently no authentication is required. Add your own auth middleware as needed.
-  version: 0.1.0
+  version: 0.4.0
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT

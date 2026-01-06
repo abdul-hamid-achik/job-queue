@@ -25,6 +25,9 @@ func getRedisClient(t *testing.T) *redis.Client {
 		t.Skipf("invalid REDIS_URL: %v", err)
 	}
 
+	// Use database 1 for tests to avoid conflicts with other running services
+	opts.DB = 1
+
 	client := redis.NewClient(opts)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -33,6 +36,9 @@ func getRedisClient(t *testing.T) *redis.Client {
 	if err := client.Ping(ctx).Err(); err != nil {
 		t.Skipf("Redis not available: %v", err)
 	}
+
+	// Clean the test database to ensure isolation
+	client.FlushDB(ctx)
 
 	return client
 }
@@ -52,6 +58,16 @@ func cleanupRedis(t *testing.T, client *redis.Client) {
 	if len(allKeys) > 0 {
 		client.Del(ctx, allKeys...)
 	}
+}
+
+// newTestBroker creates a broker with unique worker ID and group name for test isolation
+func newTestBroker(t *testing.T, client *redis.Client) *RedisStreamsBroker {
+	t.Helper()
+	uniqueID := uuid.New().String()[:8]
+	return NewRedisStreamsBroker(client,
+		WithWorkerID(fmt.Sprintf("test-worker-%s", uniqueID)),
+		WithGroupName(fmt.Sprintf("test-group-%s", uniqueID)),
+	)
 }
 
 func TestRedisStreamsBroker_Integration_Ping(t *testing.T) {
@@ -81,9 +97,7 @@ func TestRedisStreamsBroker_Integration_EnqueueDequeue(t *testing.T) {
 	cleanupRedis(t, client)
 	defer cleanupRedis(t, client)
 
-	workerID := fmt.Sprintf("test-worker-%s", uuid.New().String()[:8])
-	broker := NewRedisStreamsBroker(client, WithWorkerID(workerID))
-
+	broker := newTestBroker(t, client)
 	ctx := context.Background()
 
 	// Create and enqueue a job
@@ -129,8 +143,7 @@ func TestRedisStreamsBroker_Integration_Ack(t *testing.T) {
 	cleanupRedis(t, client)
 	defer cleanupRedis(t, client)
 
-	workerID := fmt.Sprintf("test-worker-%s", uuid.New().String()[:8])
-	broker := NewRedisStreamsBroker(client, WithWorkerID(workerID))
+	broker := newTestBroker(t, client)
 	ctx := context.Background()
 
 	// Enqueue and dequeue
@@ -170,8 +183,7 @@ func TestRedisStreamsBroker_Integration_Nack(t *testing.T) {
 	cleanupRedis(t, client)
 	defer cleanupRedis(t, client)
 
-	workerID := fmt.Sprintf("test-worker-%s", uuid.New().String()[:8])
-	broker := NewRedisStreamsBroker(client, WithWorkerID(workerID))
+	broker := newTestBroker(t, client)
 	ctx := context.Background()
 
 	// Enqueue job with retries
@@ -214,8 +226,7 @@ func TestRedisStreamsBroker_Integration_NackExhausted(t *testing.T) {
 	cleanupRedis(t, client)
 	defer cleanupRedis(t, client)
 
-	workerID := fmt.Sprintf("test-worker-%s", uuid.New().String()[:8])
-	broker := NewRedisStreamsBroker(client, WithWorkerID(workerID))
+	broker := newTestBroker(t, client)
 	ctx := context.Background()
 
 	// Enqueue job with no retries
@@ -255,7 +266,7 @@ func TestRedisStreamsBroker_Integration_Schedule(t *testing.T) {
 	cleanupRedis(t, client)
 	defer cleanupRedis(t, client)
 
-	broker := NewRedisStreamsBroker(client)
+	broker := newTestBroker(t, client)
 	ctx := context.Background()
 
 	// Schedule a job for future execution
@@ -290,7 +301,7 @@ func TestRedisStreamsBroker_Integration_GetDelayedJobs(t *testing.T) {
 	cleanupRedis(t, client)
 	defer cleanupRedis(t, client)
 
-	broker := NewRedisStreamsBroker(client)
+	broker := newTestBroker(t, client)
 	ctx := context.Background()
 
 	// Schedule jobs - some due, some not
@@ -324,8 +335,7 @@ func TestRedisStreamsBroker_Integration_MoveDelayedToQueue(t *testing.T) {
 	cleanupRedis(t, client)
 	defer cleanupRedis(t, client)
 
-	workerID := fmt.Sprintf("test-worker-%s", uuid.New().String()[:8])
-	broker := NewRedisStreamsBroker(client, WithWorkerID(workerID))
+	broker := newTestBroker(t, client)
 	ctx := context.Background()
 
 	// Schedule a job
@@ -358,7 +368,7 @@ func TestRedisStreamsBroker_Integration_GetQueueDepth(t *testing.T) {
 	cleanupRedis(t, client)
 	defer cleanupRedis(t, client)
 
-	broker := NewRedisStreamsBroker(client)
+	broker := newTestBroker(t, client)
 	ctx := context.Background()
 
 	// Enqueue some jobs
@@ -386,7 +396,7 @@ func TestRedisStreamsBroker_Integration_GetStats(t *testing.T) {
 	cleanupRedis(t, client)
 	defer cleanupRedis(t, client)
 
-	broker := NewRedisStreamsBroker(client)
+	broker := newTestBroker(t, client)
 	ctx := context.Background()
 
 	// Enqueue jobs with different priorities
@@ -425,7 +435,7 @@ func TestRedisStreamsBroker_Integration_DeleteJob(t *testing.T) {
 	cleanupRedis(t, client)
 	defer cleanupRedis(t, client)
 
-	broker := NewRedisStreamsBroker(client)
+	broker := newTestBroker(t, client)
 	ctx := context.Background()
 
 	// Create and enqueue a job
@@ -471,8 +481,7 @@ func TestRedisStreamsBroker_Integration_PriorityOrder(t *testing.T) {
 	cleanupRedis(t, client)
 	defer cleanupRedis(t, client)
 
-	workerID := fmt.Sprintf("test-worker-%s", uuid.New().String()[:8])
-	broker := NewRedisStreamsBroker(client, WithWorkerID(workerID))
+	broker := newTestBroker(t, client)
 	ctx := context.Background()
 
 	// Enqueue jobs in reverse priority order
@@ -525,8 +534,7 @@ func TestRedisStreamsBroker_Integration_EmptyQueue(t *testing.T) {
 	cleanupRedis(t, client)
 	defer cleanupRedis(t, client)
 
-	workerID := fmt.Sprintf("test-worker-%s", uuid.New().String()[:8])
-	broker := NewRedisStreamsBroker(client, WithWorkerID(workerID))
+	broker := newTestBroker(t, client)
 	ctx := context.Background()
 
 	// Try to dequeue from empty queue with short timeout
@@ -546,7 +554,7 @@ func TestRedisStreamsBroker_Integration_InvalidJob(t *testing.T) {
 	cleanupRedis(t, client)
 	defer cleanupRedis(t, client)
 
-	broker := NewRedisStreamsBroker(client)
+	broker := newTestBroker(t, client)
 	ctx := context.Background()
 
 	// Try to enqueue an invalid job (empty type)
