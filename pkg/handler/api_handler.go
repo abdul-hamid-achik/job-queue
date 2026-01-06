@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -16,19 +17,35 @@ import (
 // This is set during initialization from the api/openapi.yaml file.
 var OpenAPISpec []byte
 
+// ExecutionRepository defines the interface for execution repository operations.
+type ExecutionRepository interface {
+	List(ctx context.Context, filter repository.ExecutionFilter) ([]*repository.JobExecution, error)
+	GetByJobID(ctx context.Context, jobID string) ([]*repository.JobExecution, error)
+	GetStats(ctx context.Context, fromDate, toDate time.Time) (*repository.ExecutionStats, error)
+}
+
+// DLQRepository defines the interface for dead letter queue repository operations.
+type DLQRepository interface {
+	List(ctx context.Context, filter repository.DLQFilter) ([]*repository.DeadLetterJob, error)
+	GetByID(ctx context.Context, id string) (*repository.DeadLetterJob, error)
+	MarkRequeued(ctx context.Context, id string) error
+	Delete(ctx context.Context, id string) error
+	Count(ctx context.Context) (int64, error)
+}
+
 // APIHandler handles HTTP requests for the management API.
 type APIHandler struct {
 	broker   broker.Broker
-	execRepo *repository.ExecutionRepository
-	dlqRepo  *repository.DLQRepository
+	execRepo ExecutionRepository
+	dlqRepo  DLQRepository
 	logger   zerolog.Logger
 }
 
 // NewAPIHandler creates a new APIHandler.
 func NewAPIHandler(
 	b broker.Broker,
-	execRepo *repository.ExecutionRepository,
-	dlqRepo *repository.DLQRepository,
+	execRepo ExecutionRepository,
+	dlqRepo DLQRepository,
 	logger zerolog.Logger,
 ) *APIHandler {
 	return &APIHandler{

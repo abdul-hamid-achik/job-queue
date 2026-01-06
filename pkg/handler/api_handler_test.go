@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/abdul-hamid-achik/job-queue/pkg/job"
+	"github.com/abdul-hamid-achik/job-queue/pkg/repository"
 	"github.com/abdul-hamid-achik/job-queue/testutil"
 	"github.com/rs/zerolog"
 )
@@ -640,5 +641,474 @@ func TestAPIHandler_OpenAPISpec_NotAvailable(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("expected status %d, got %d", http.StatusNotFound, w.Code)
+	}
+}
+
+func TestAPIHandler_ListDLQ(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dlq", nil)
+	w := httptest.NewRecorder()
+
+	h.ListDLQ(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestAPIHandler_ListDLQ_WithFilters(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dlq?limit=10&offset=5&type=email.send&queue=critical", nil)
+	w := httptest.NewRecorder()
+
+	h.ListDLQ(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestAPIHandler_ListDLQ_Error(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	dlqRepo.ListFunc = func(ctx context.Context, filter repository.DLQFilter) ([]*repository.DeadLetterJob, error) {
+		return nil, errors.New("db error")
+	}
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dlq", nil)
+	w := httptest.NewRecorder()
+
+	h.ListDLQ(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+func TestAPIHandler_GetDLQJob(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	dlj := &repository.DeadLetterJob{
+		ID:       "dlq-123",
+		JobID:    "job-456",
+		JobType:  "email.send",
+		Queue:    "default",
+		Priority: "medium",
+	}
+	dlqRepo.AddJob(dlj)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dlq/dlq-123", nil)
+	req.SetPathValue("id", "dlq-123")
+	w := httptest.NewRecorder()
+
+	h.GetDLQJob(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestAPIHandler_GetDLQJob_NotFound(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dlq/nonexistent", nil)
+	req.SetPathValue("id", "nonexistent")
+	w := httptest.NewRecorder()
+
+	h.GetDLQJob(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status %d, got %d", http.StatusNotFound, w.Code)
+	}
+}
+
+func TestAPIHandler_GetDLQJob_MissingID(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dlq/", nil)
+	req.SetPathValue("id", "")
+	w := httptest.NewRecorder()
+
+	h.GetDLQJob(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestAPIHandler_GetDLQJob_Error(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	dlqRepo.GetByIDFunc = func(ctx context.Context, id string) (*repository.DeadLetterJob, error) {
+		return nil, errors.New("db error")
+	}
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dlq/test-id", nil)
+	req.SetPathValue("id", "test-id")
+	w := httptest.NewRecorder()
+
+	h.GetDLQJob(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+func TestAPIHandler_RetryDLQJob(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	dlj := &repository.DeadLetterJob{
+		ID:                "dlq-123",
+		JobID:             "job-456",
+		JobType:           "email.send",
+		Queue:             "default",
+		Payload:           json.RawMessage(`{"to":"test@example.com"}`),
+		Priority:          "medium",
+		MaxRetries:        3,
+		OriginalCreatedAt: time.Now(),
+	}
+	dlqRepo.AddJob(dlj)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/dlq/dlq-123/retry", nil)
+	req.SetPathValue("id", "dlq-123")
+	w := httptest.NewRecorder()
+
+	h.RetryDLQJob(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d. Body: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+
+	if len(mb.QueuedJobs()) != 1 {
+		t.Errorf("expected 1 job in queue, got %d", len(mb.QueuedJobs()))
+	}
+}
+
+func TestAPIHandler_RetryDLQJob_NotFound(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/dlq/nonexistent/retry", nil)
+	req.SetPathValue("id", "nonexistent")
+	w := httptest.NewRecorder()
+
+	h.RetryDLQJob(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status %d, got %d", http.StatusNotFound, w.Code)
+	}
+}
+
+func TestAPIHandler_RetryDLQJob_MissingID(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/dlq//retry", nil)
+	req.SetPathValue("id", "")
+	w := httptest.NewRecorder()
+
+	h.RetryDLQJob(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestAPIHandler_RetryDLQJob_EnqueueError(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	mb.EnqueueFunc = func(ctx context.Context, j *job.Job) error {
+		return errors.New("redis error")
+	}
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	dlj := &repository.DeadLetterJob{
+		ID:                "dlq-123",
+		JobID:             "job-456",
+		JobType:           "email.send",
+		Queue:             "default",
+		Priority:          "medium",
+		OriginalCreatedAt: time.Now(),
+	}
+	dlqRepo.AddJob(dlj)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/dlq/dlq-123/retry", nil)
+	req.SetPathValue("id", "dlq-123")
+	w := httptest.NewRecorder()
+
+	h.RetryDLQJob(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+func TestAPIHandler_DeleteDLQJob(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	dlj := &repository.DeadLetterJob{
+		ID:      "dlq-123",
+		JobID:   "job-456",
+		JobType: "email.send",
+	}
+	dlqRepo.AddJob(dlj)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/dlq/dlq-123", nil)
+	req.SetPathValue("id", "dlq-123")
+	w := httptest.NewRecorder()
+
+	h.DeleteDLQJob(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestAPIHandler_DeleteDLQJob_NotFound(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/dlq/nonexistent", nil)
+	req.SetPathValue("id", "nonexistent")
+	w := httptest.NewRecorder()
+
+	h.DeleteDLQJob(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status %d, got %d", http.StatusNotFound, w.Code)
+	}
+}
+
+func TestAPIHandler_DeleteDLQJob_MissingID(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/dlq/", nil)
+	req.SetPathValue("id", "")
+	w := httptest.NewRecorder()
+
+	h.DeleteDLQJob(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestAPIHandler_DeleteDLQJob_Error(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	dlqRepo.DeleteFunc = func(ctx context.Context, id string) error {
+		return errors.New("db error")
+	}
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/dlq/test-id", nil)
+	req.SetPathValue("id", "test-id")
+	w := httptest.NewRecorder()
+
+	h.DeleteDLQJob(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+func TestAPIHandler_ListExecutions(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/executions", nil)
+	w := httptest.NewRecorder()
+
+	h.ListExecutions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestAPIHandler_ListExecutions_WithFilters(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/executions?limit=50&offset=10&type=email.send&state=completed", nil)
+	w := httptest.NewRecorder()
+
+	h.ListExecutions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestAPIHandler_ListExecutions_Error(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	execRepo.ListFunc = func(ctx context.Context, filter repository.ExecutionFilter) ([]*repository.JobExecution, error) {
+		return nil, errors.New("db error")
+	}
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/executions", nil)
+	w := httptest.NewRecorder()
+
+	h.ListExecutions(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+func TestAPIHandler_GetExecutions(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/executions/job-123", nil)
+	req.SetPathValue("jobID", "job-123")
+	w := httptest.NewRecorder()
+
+	h.GetExecutions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestAPIHandler_GetExecutions_MissingJobID(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/executions/", nil)
+	req.SetPathValue("jobID", "")
+	w := httptest.NewRecorder()
+
+	h.GetExecutions(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestAPIHandler_GetExecutions_Error(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	execRepo.GetByJobIDFunc = func(ctx context.Context, jobID string) ([]*repository.JobExecution, error) {
+		return nil, errors.New("db error")
+	}
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/executions/job-123", nil)
+	req.SetPathValue("jobID", "job-123")
+	w := httptest.NewRecorder()
+
+	h.GetExecutions(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+func TestAPIHandler_GetStats(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats", nil)
+	w := httptest.NewRecorder()
+
+	h.GetStats(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestAPIHandler_GetStats_Error(t *testing.T) {
+	mb := testutil.NewMockBroker()
+	dlqRepo := testutil.NewMockDLQRepository()
+	execRepo := testutil.NewMockExecutionRepository()
+	execRepo.GetStatsFunc = func(ctx context.Context, fromDate, toDate time.Time) (*repository.ExecutionStats, error) {
+		return nil, errors.New("db error")
+	}
+	logger := zerolog.Nop()
+	h := NewAPIHandler(mb, execRepo, dlqRepo, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats", nil)
+	w := httptest.NewRecorder()
+
+	h.GetStats(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
 	}
 }

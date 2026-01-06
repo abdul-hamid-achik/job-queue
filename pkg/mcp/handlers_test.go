@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/abdul-hamid-achik/job-queue/pkg/job"
+	"github.com/abdul-hamid-achik/job-queue/pkg/repository"
 	"github.com/abdul-hamid-achik/job-queue/testutil"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -546,6 +548,398 @@ func TestNewServer(t *testing.T) {
 		}
 		if s.mcpServer == nil {
 			t.Error("expected mcpServer to be set")
+		}
+	})
+}
+
+func TestServer_HandleDeleteJob_Error(t *testing.T) {
+	t.Run("returns error when delete fails", func(t *testing.T) {
+		broker := testutil.NewMockBroker()
+		broker.DeleteJobFunc = func(ctx context.Context, jobID string) error {
+			return errors.New("redis error")
+		}
+		s := NewServer(broker, nil, nil)
+
+		request := mcp.CallToolRequest{}
+		request.Params.Arguments = map[string]interface{}{
+			"id": "test-id",
+		}
+
+		result, err := s.handleDeleteJob(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !result.IsError {
+			t.Errorf("expected error result")
+		}
+	})
+}
+
+func TestServer_HandleListDLQ_WithFilters(t *testing.T) {
+	t.Run("lists DLQ with filters", func(t *testing.T) {
+		broker := testutil.NewMockBroker()
+		dlqRepo := testutil.NewMockDLQRepository()
+		s := NewServer(broker, nil, dlqRepo)
+
+		request := mcp.CallToolRequest{}
+		request.Params.Arguments = map[string]interface{}{
+			"limit":  float64(50),
+			"offset": float64(10),
+			"type":   "email.send",
+			"queue":  "default",
+		}
+
+		result, err := s.handleListDLQ(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.IsError {
+			t.Errorf("expected success, got error")
+		}
+	})
+
+	t.Run("returns error when list fails", func(t *testing.T) {
+		broker := testutil.NewMockBroker()
+		dlqRepo := testutil.NewMockDLQRepository()
+		dlqRepo.ListFunc = func(ctx context.Context, filter repository.DLQFilter) ([]*repository.DeadLetterJob, error) {
+			return nil, errors.New("db error")
+		}
+		s := NewServer(broker, nil, dlqRepo)
+
+		request := mcp.CallToolRequest{}
+
+		result, err := s.handleListDLQ(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !result.IsError {
+			t.Errorf("expected error result")
+		}
+	})
+}
+
+func TestServer_HandleGetDLQJob_Success(t *testing.T) {
+	t.Run("gets DLQ job successfully", func(t *testing.T) {
+		broker := testutil.NewMockBroker()
+		dlqRepo := testutil.NewMockDLQRepository()
+
+		dlj := &repository.DeadLetterJob{
+			ID:      "dlq-123",
+			JobID:   "job-456",
+			JobType: "email.send",
+		}
+		dlqRepo.AddJob(dlj)
+
+		s := NewServer(broker, nil, dlqRepo)
+
+		request := mcp.CallToolRequest{}
+		request.Params.Arguments = map[string]interface{}{
+			"id": "dlq-123",
+		}
+
+		result, err := s.handleGetDLQJob(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.IsError {
+			t.Errorf("expected success, got error")
+		}
+	})
+
+	t.Run("returns error when job not found", func(t *testing.T) {
+		broker := testutil.NewMockBroker()
+		dlqRepo := testutil.NewMockDLQRepository()
+		s := NewServer(broker, nil, dlqRepo)
+
+		request := mcp.CallToolRequest{}
+		request.Params.Arguments = map[string]interface{}{
+			"id": "non-existent",
+		}
+
+		result, err := s.handleGetDLQJob(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !result.IsError {
+			t.Errorf("expected error result")
+		}
+	})
+}
+
+func TestServer_HandleRetryDLQJob_Success(t *testing.T) {
+	t.Run("retries DLQ job successfully", func(t *testing.T) {
+		broker := testutil.NewMockBroker()
+		dlqRepo := testutil.NewMockDLQRepository()
+
+		dlj := &repository.DeadLetterJob{
+			ID:       "dlq-123",
+			JobID:    "job-456",
+			JobType:  "email.send",
+			Queue:    "default",
+			Priority: "medium",
+		}
+		dlqRepo.AddJob(dlj)
+
+		s := NewServer(broker, nil, dlqRepo)
+
+		request := mcp.CallToolRequest{}
+		request.Params.Arguments = map[string]interface{}{
+			"id": "dlq-123",
+		}
+
+		result, err := s.handleRetryDLQJob(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.IsError {
+			t.Errorf("expected success, got error")
+		}
+
+		if len(broker.QueuedJobs()) != 1 {
+			t.Errorf("expected 1 job in queue")
+		}
+	})
+
+	t.Run("returns error when job not found", func(t *testing.T) {
+		broker := testutil.NewMockBroker()
+		dlqRepo := testutil.NewMockDLQRepository()
+		s := NewServer(broker, nil, dlqRepo)
+
+		request := mcp.CallToolRequest{}
+		request.Params.Arguments = map[string]interface{}{
+			"id": "non-existent",
+		}
+
+		result, err := s.handleRetryDLQJob(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !result.IsError {
+			t.Errorf("expected error result")
+		}
+	})
+
+	t.Run("returns error when enqueue fails", func(t *testing.T) {
+		broker := testutil.NewMockBroker()
+		broker.EnqueueFunc = func(ctx context.Context, j *job.Job) error {
+			return errors.New("redis error")
+		}
+		dlqRepo := testutil.NewMockDLQRepository()
+
+		dlj := &repository.DeadLetterJob{
+			ID:       "dlq-123",
+			JobID:    "job-456",
+			JobType:  "email.send",
+			Queue:    "default",
+			Priority: "medium",
+		}
+		dlqRepo.AddJob(dlj)
+
+		s := NewServer(broker, nil, dlqRepo)
+
+		request := mcp.CallToolRequest{}
+		request.Params.Arguments = map[string]interface{}{
+			"id": "dlq-123",
+		}
+
+		result, err := s.handleRetryDLQJob(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !result.IsError {
+			t.Errorf("expected error result")
+		}
+	})
+}
+
+func TestServer_HandleDeleteDLQJob_Success(t *testing.T) {
+	t.Run("deletes DLQ job successfully", func(t *testing.T) {
+		broker := testutil.NewMockBroker()
+		dlqRepo := testutil.NewMockDLQRepository()
+
+		dlj := &repository.DeadLetterJob{
+			ID:      "dlq-123",
+			JobID:   "job-456",
+			JobType: "email.send",
+		}
+		dlqRepo.AddJob(dlj)
+
+		s := NewServer(broker, nil, dlqRepo)
+
+		request := mcp.CallToolRequest{}
+		request.Params.Arguments = map[string]interface{}{
+			"id": "dlq-123",
+		}
+
+		result, err := s.handleDeleteDLQJob(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.IsError {
+			t.Errorf("expected success, got error")
+		}
+	})
+
+	t.Run("returns error when delete fails", func(t *testing.T) {
+		broker := testutil.NewMockBroker()
+		dlqRepo := testutil.NewMockDLQRepository()
+		dlqRepo.DeleteFunc = func(ctx context.Context, id string) error {
+			return errors.New("db error")
+		}
+		s := NewServer(broker, nil, dlqRepo)
+
+		request := mcp.CallToolRequest{}
+		request.Params.Arguments = map[string]interface{}{
+			"id": "test-id",
+		}
+
+		result, err := s.handleDeleteDLQJob(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !result.IsError {
+			t.Errorf("expected error result")
+		}
+	})
+}
+
+func TestServer_HandleListExecutions_WithFilters(t *testing.T) {
+	t.Run("lists executions with filters", func(t *testing.T) {
+		broker := testutil.NewMockBroker()
+		execRepo := testutil.NewMockExecutionRepository()
+		s := NewServer(broker, execRepo, nil)
+
+		request := mcp.CallToolRequest{}
+		request.Params.Arguments = map[string]interface{}{
+			"limit":  float64(50),
+			"offset": float64(10),
+			"type":   "email.send",
+			"state":  "completed",
+		}
+
+		result, err := s.handleListExecutions(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.IsError {
+			t.Errorf("expected success, got error")
+		}
+	})
+
+	t.Run("returns error when list fails", func(t *testing.T) {
+		broker := testutil.NewMockBroker()
+		execRepo := testutil.NewMockExecutionRepository()
+		execRepo.ListFunc = func(ctx context.Context, filter repository.ExecutionFilter) ([]*repository.JobExecution, error) {
+			return nil, errors.New("db error")
+		}
+		s := NewServer(broker, execRepo, nil)
+
+		request := mcp.CallToolRequest{}
+
+		result, err := s.handleListExecutions(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !result.IsError {
+			t.Errorf("expected error result")
+		}
+	})
+}
+
+func TestServer_HandleGetJobExecutions_Success(t *testing.T) {
+	t.Run("gets job executions successfully", func(t *testing.T) {
+		broker := testutil.NewMockBroker()
+		execRepo := testutil.NewMockExecutionRepository()
+		s := NewServer(broker, execRepo, nil)
+
+		request := mcp.CallToolRequest{}
+		request.Params.Arguments = map[string]interface{}{
+			"job_id": "job-123",
+		}
+
+		result, err := s.handleGetJobExecutions(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.IsError {
+			t.Errorf("expected success, got error")
+		}
+	})
+
+	t.Run("returns error when get fails", func(t *testing.T) {
+		broker := testutil.NewMockBroker()
+		execRepo := testutil.NewMockExecutionRepository()
+		execRepo.GetByJobIDFunc = func(ctx context.Context, jobID string) ([]*repository.JobExecution, error) {
+			return nil, errors.New("db error")
+		}
+		s := NewServer(broker, execRepo, nil)
+
+		request := mcp.CallToolRequest{}
+		request.Params.Arguments = map[string]interface{}{
+			"job_id": "job-123",
+		}
+
+		result, err := s.handleGetJobExecutions(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !result.IsError {
+			t.Errorf("expected error result")
+		}
+	})
+}
+
+func TestServer_HandleGetStats_Success(t *testing.T) {
+	t.Run("gets stats successfully", func(t *testing.T) {
+		broker := testutil.NewMockBroker()
+		execRepo := testutil.NewMockExecutionRepository()
+		dlqRepo := testutil.NewMockDLQRepository()
+		s := NewServer(broker, execRepo, dlqRepo)
+
+		request := mcp.CallToolRequest{}
+
+		result, err := s.handleGetStats(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.IsError {
+			t.Errorf("expected success, got error")
+		}
+	})
+
+	t.Run("returns error when stats fails", func(t *testing.T) {
+		broker := testutil.NewMockBroker()
+		execRepo := testutil.NewMockExecutionRepository()
+		execRepo.GetStatsFunc = func(ctx context.Context, fromDate, toDate time.Time) (*repository.ExecutionStats, error) {
+			return nil, errors.New("db error")
+		}
+		dlqRepo := testutil.NewMockDLQRepository()
+		s := NewServer(broker, execRepo, dlqRepo)
+
+		request := mcp.CallToolRequest{}
+
+		result, err := s.handleGetStats(context.Background(), request)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !result.IsError {
+			t.Errorf("expected error result")
 		}
 	})
 }

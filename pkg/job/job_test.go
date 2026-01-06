@@ -290,6 +290,280 @@ func TestJob_JSONSerialization(t *testing.T) {
 	assert.Equal(t, original.State, decoded.State)
 }
 
+func TestJob_IncrementRetry(t *testing.T) {
+	t.Run("increments retry count", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		assert.Equal(t, 0, j.RetryCount)
+
+		j.IncrementRetry(nil)
+		assert.Equal(t, 1, j.RetryCount)
+
+		j.IncrementRetry(nil)
+		assert.Equal(t, 2, j.RetryCount)
+	})
+
+	t.Run("sets last error", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		err := assert.AnError
+
+		j.IncrementRetry(err)
+
+		assert.Equal(t, 1, j.RetryCount)
+		assert.Equal(t, err.Error(), j.LastError)
+	})
+
+	t.Run("does not set last error when nil", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		j.LastError = "previous error"
+
+		j.IncrementRetry(nil)
+
+		assert.Equal(t, "previous error", j.LastError)
+	})
+}
+
+func TestJob_MarkStarted(t *testing.T) {
+	t.Run("marks pending job as started", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		j.State = job.StatePending
+
+		err := j.MarkStarted()
+
+		require.NoError(t, err)
+		assert.Equal(t, job.StateProcessing, j.State)
+		assert.NotNil(t, j.StartedAt)
+	})
+
+	t.Run("marks queued job as started", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		j.State = job.StateQueued
+
+		err := j.MarkStarted()
+
+		require.NoError(t, err)
+		assert.Equal(t, job.StateProcessing, j.State)
+	})
+
+	t.Run("fails when job is already processing", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		j.State = job.StateProcessing
+
+		err := j.MarkStarted()
+
+		assert.Error(t, err)
+	})
+
+	t.Run("fails when job is completed", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		j.State = job.StateCompleted
+
+		err := j.MarkStarted()
+
+		assert.Error(t, err)
+	})
+}
+
+func TestJob_MarkCompleted(t *testing.T) {
+	t.Run("marks processing job as completed", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		j.State = job.StateProcessing
+
+		err := j.MarkCompleted()
+
+		require.NoError(t, err)
+		assert.Equal(t, job.StateCompleted, j.State)
+		assert.NotNil(t, j.CompletedAt)
+	})
+
+	t.Run("fails when job is pending", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		j.State = job.StatePending
+
+		err := j.MarkCompleted()
+
+		assert.Error(t, err)
+	})
+
+	t.Run("fails when job is already completed", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		j.State = job.StateCompleted
+
+		err := j.MarkCompleted()
+
+		assert.Error(t, err)
+	})
+}
+
+func TestJob_MarkFailed(t *testing.T) {
+	t.Run("marks processing job as failed", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		j.State = job.StateProcessing
+
+		err := j.MarkFailed(assert.AnError)
+
+		require.NoError(t, err)
+		assert.Equal(t, job.StateFailed, j.State)
+		assert.NotNil(t, j.CompletedAt)
+		assert.Equal(t, assert.AnError.Error(), j.LastError)
+	})
+
+	t.Run("marks pending job as failed", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		j.State = job.StatePending
+
+		err := j.MarkFailed(nil)
+
+		require.NoError(t, err)
+		assert.Equal(t, job.StateFailed, j.State)
+	})
+
+	t.Run("fails when job is completed", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		j.State = job.StateCompleted
+
+		err := j.MarkFailed(assert.AnError)
+
+		assert.Error(t, err)
+	})
+
+	t.Run("fails when job is already failed", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		j.State = job.StateFailed
+
+		err := j.MarkFailed(assert.AnError)
+
+		assert.Error(t, err)
+	})
+}
+
+func TestJob_MarkDead(t *testing.T) {
+	t.Run("marks job as dead when retries exhausted", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		j.MaxRetries = 3
+		j.RetryCount = 3
+
+		err := j.MarkDead()
+
+		require.NoError(t, err)
+		assert.Equal(t, job.StateDead, j.State)
+		assert.NotNil(t, j.CompletedAt)
+	})
+
+	t.Run("fails when retries remaining", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		j.MaxRetries = 3
+		j.RetryCount = 2
+
+		err := j.MarkDead()
+
+		assert.Error(t, err)
+		assert.NotEqual(t, job.StateDead, j.State)
+	})
+}
+
+func TestJob_IsReady(t *testing.T) {
+	t.Run("returns true when not delayed", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		assert.True(t, j.IsReady())
+	})
+
+	t.Run("returns false when scheduled in future", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		future := time.Now().Add(1 * time.Hour)
+		j.ScheduledAt = &future
+
+		assert.False(t, j.IsReady())
+	})
+
+	t.Run("returns true when scheduled time passed", func(t *testing.T) {
+		j := mustNewJob(t, "test", nil)
+		past := time.Now().Add(-1 * time.Hour)
+		j.ScheduledAt = &past
+
+		assert.True(t, j.IsReady())
+	})
+}
+
+func TestJob_Clone_AllFields(t *testing.T) {
+	original := mustNewJob(t, "test", map[string]string{"key": "value"})
+	original.Metadata["meta"] = "data"
+	now := time.Now()
+	future := now.Add(1 * time.Hour)
+	original.StartedAt = &now
+	original.CompletedAt = &now
+	original.ScheduledAt = &future
+
+	clone := original.Clone()
+
+	assert.Equal(t, original.ScheduledAt.Unix(), clone.ScheduledAt.Unix())
+	assert.Equal(t, original.CompletedAt.Unix(), clone.CompletedAt.Unix())
+
+	// Modify clone's scheduledAt
+	later := time.Now().Add(2 * time.Hour)
+	clone.ScheduledAt = &later
+	assert.NotEqual(t, original.ScheduledAt, clone.ScheduledAt)
+}
+
+func TestWithMetadata_NilMetadata(t *testing.T) {
+	j := &job.Job{}
+	opt := job.WithMetadata("key", "value")
+	opt(j)
+
+	assert.Equal(t, "value", j.Metadata["key"])
+}
+
+func TestPriority_String(t *testing.T) {
+	tests := []struct {
+		priority job.Priority
+		expected string
+	}{
+		{job.PriorityLow, "low"},
+		{job.PriorityMedium, "medium"},
+		{job.PriorityHigh, "high"},
+		{job.Priority(99), "unknown(99)"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.expected, func(t *testing.T) {
+			assert.Equal(t, tc.expected, tc.priority.String())
+		})
+	}
+}
+
+func TestParsePriority(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected job.Priority
+	}{
+		{"low", job.PriorityLow},
+		{"medium", job.PriorityMedium},
+		{"high", job.PriorityHigh},
+		{"", job.PriorityMedium},
+		{"invalid", job.PriorityMedium},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			assert.Equal(t, tc.expected, job.ParsePriority(tc.input))
+		})
+	}
+}
+
+func TestPriority_QueueSuffix(t *testing.T) {
+	assert.Equal(t, "low", job.PriorityLow.QueueSuffix())
+	assert.Equal(t, "medium", job.PriorityMedium.QueueSuffix())
+	assert.Equal(t, "high", job.PriorityHigh.QueueSuffix())
+}
+
+func TestAllPriorities(t *testing.T) {
+	priorities := job.AllPriorities()
+
+	assert.Len(t, priorities, 3)
+	assert.Contains(t, priorities, job.PriorityLow)
+	assert.Contains(t, priorities, job.PriorityMedium)
+	assert.Contains(t, priorities, job.PriorityHigh)
+}
+
 func mustNewJob(t *testing.T, jobType string, payload interface{}) *job.Job {
 	t.Helper()
 	j, err := job.New(jobType, payload)

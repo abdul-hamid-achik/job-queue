@@ -1,22 +1,41 @@
 package mcp
 
 import (
+	"context"
+	"time"
+
 	"github.com/abdul-hamid-achik/job-queue/pkg/broker"
 	"github.com/abdul-hamid-achik/job-queue/pkg/repository"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
 
+// ExecutionRepository defines the interface for execution repository operations.
+type ExecutionRepository interface {
+	List(ctx context.Context, filter repository.ExecutionFilter) ([]*repository.JobExecution, error)
+	GetByJobID(ctx context.Context, jobID string) ([]*repository.JobExecution, error)
+	GetStats(ctx context.Context, fromDate, toDate time.Time) (*repository.ExecutionStats, error)
+}
+
+// DLQRepository defines the interface for dead letter queue repository operations.
+type DLQRepository interface {
+	List(ctx context.Context, filter repository.DLQFilter) ([]*repository.DeadLetterJob, error)
+	GetByID(ctx context.Context, id string) (*repository.DeadLetterJob, error)
+	MarkRequeued(ctx context.Context, id string) error
+	Delete(ctx context.Context, id string) error
+	Count(ctx context.Context) (int64, error)
+}
+
 // Server wraps the MCP server with job queue functionality.
 type Server struct {
 	mcpServer *server.MCPServer
 	broker    broker.Broker
-	execRepo  *repository.ExecutionRepository
-	dlqRepo   *repository.DLQRepository
+	execRepo  ExecutionRepository
+	dlqRepo   DLQRepository
 }
 
 // NewServer creates a new MCP server for the job queue.
-func NewServer(b broker.Broker, execRepo *repository.ExecutionRepository, dlqRepo *repository.DLQRepository) *Server {
+func NewServer(b broker.Broker, execRepo ExecutionRepository, dlqRepo DLQRepository) *Server {
 	s := &Server{
 		broker:   b,
 		execRepo: execRepo,

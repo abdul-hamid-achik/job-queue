@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-01-06
+
+### Added
+
+- Comprehensive test suite improvements achieving 80%+ coverage on most packages:
+  - handler: 51% → 97.4%
+  - middleware: 48% → 95.1%
+  - scheduler: 43% → 94.8%
+  - job: 70% → 96.3%
+  - mcp: 58% → 96.2%
+  - broker: 60% → 80.2%
+  - worker: 83.3%
+  - config: 96.9%
+- Mock repository implementations (`MockDLQRepository`, `MockExecutionRepository`, `MockScheduleRepository`) for comprehensive unit testing
+- Interface-based repository design for better testability (`DLQRepository`, `ExecutionRepository`, `ScheduleRepository`)
+- Full test coverage for job state transitions (`MarkStarted`, `MarkCompleted`, `MarkFailed`, `MarkDead`)
+- CronScheduler comprehensive tests including error handling paths
+
+### Changed
+
+- Refactored `APIHandler` to use repository interfaces instead of concrete types
+- Refactored `CronScheduler` to use `ScheduleRepository` interface
+- Improved test isolation with unique IDs and cleanup
+
+### Fixed
+
+- Handler tests now properly mock DLQ and execution repositories
+- Scheduler tests now properly mock schedule repository operations
+
 ## [0.4.0] - 2026-01-06
 
 ### Fixed

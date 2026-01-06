@@ -14,9 +14,17 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// ScheduleRepository defines the interface for schedule repository operations.
+type ScheduleRepository interface {
+	ListActive(ctx context.Context) ([]*repository.JobSchedule, error)
+	ListDue(ctx context.Context, until time.Time) ([]*repository.JobSchedule, error)
+	UpdateNextRun(ctx context.Context, id string, nextRunAt time.Time) error
+	RecordRun(ctx context.Context, id string, status string, nextRunAt time.Time) error
+}
+
 type CronScheduler struct {
 	broker       broker.Broker
-	scheduleRepo *repository.ScheduleRepository
+	scheduleRepo ScheduleRepository
 	parser       cron.Parser
 	pollInterval time.Duration
 	logger       zerolog.Logger
@@ -41,7 +49,7 @@ func WithCronLogger(logger zerolog.Logger) CronSchedulerOption {
 	}
 }
 
-func NewCronScheduler(b broker.Broker, repo *repository.ScheduleRepository, opts ...CronSchedulerOption) *CronScheduler {
+func NewCronScheduler(b broker.Broker, repo ScheduleRepository, opts ...CronSchedulerOption) *CronScheduler {
 	c := &CronScheduler{
 		broker:       b,
 		scheduleRepo: repo,
