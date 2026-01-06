@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-01-06
+
+### Fixed
+
+- Corrected import paths in documentation (changed `internal/` to `pkg/` across all docs)
+  - Fixed 4 import statements in docs/guide.md
+  - Fixed 7 path references in docs/architecture.md
+- Users can now successfully use code examples from documentation
+
+### Changed
+
+- Updated dependencies:
+  - github.com/jackc/pgx/v5: v5.7.6 → v5.8.0
+  - github.com/mailru/easyjson: v0.7.7 → v0.9.1
+  - github.com/mattn/go-colorable: v0.1.13 → v0.1.14
+  - github.com/mattn/go-isatty: v0.0.19 → v0.0.20
+  - golang.org/x/crypto: v0.45.0 → v0.46.0
+  - golang.org/x/sync: v0.18.0 → v0.19.0
+  - golang.org/x/sys: v0.38.0 → v0.39.0
+  - golang.org/x/text: v0.31.0 → v0.32.0
+
+### Added
+
+- CONTRIBUTING.md with guidelines for external contributors
+- Test coverage badge in README.md (90%+ coverage)
+
 ## [0.5.0] - 2026-01-06
 
 ### Added

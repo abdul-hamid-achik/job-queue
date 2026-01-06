@@ -4,6 +4,7 @@ A production-grade background job processing system built with Go, Redis Streams
 
 [![Go Version](https://img.shields.io/badge/Go-1.23+-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Test Coverage](https://img.shields.io/badge/coverage-90%25+-brightgreen.svg)](https://github.com/abdul-hamid-achik/job-queue)
 
 ## Features
 

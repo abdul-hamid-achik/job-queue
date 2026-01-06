@@ -23,7 +23,7 @@ This job queue system uses Redis Streams for message passing and PostgreSQL for 
 
 ## Components
 
-### Broker (`internal/broker/`)
+### Broker (`pkg/broker/`)
 
 The broker handles all Redis Streams operations:
 
@@ -34,7 +34,7 @@ The broker handles all Redis Streams operations:
 
 Key implementation: `redis_streams.go`
 
-### Job (`internal/job/`)
+### Job (`pkg/job/`)
 
 Job struct with state machine:
 
@@ -46,7 +46,7 @@ pending → queued → running → completed
 
 Priorities: `critical > high > medium > low`
 
-### Worker Pool (`internal/worker/`)
+### Worker Pool (`pkg/worker/`)
 
 - **Registry**: Maps job types to handler functions
 - **Worker**: Single goroutine that dequeues and processes jobs
@@ -54,7 +54,7 @@ Priorities: `critical > high > medium > low`
 
 Workers process queues in priority order - always checking higher priority streams first.
 
-### Middleware (`internal/middleware/`)
+### Middleware (`pkg/middleware/`)
 
 Composable handlers wrapping job execution:
 
@@ -62,14 +62,14 @@ Composable handlers wrapping job execution:
 - **Logging**: Structured logging for each job
 - **Timeout**: Context-based execution timeout
 
-### Scheduler (`internal/scheduler/`)
+### Scheduler (`pkg/scheduler/`)
 
 Two polling loops:
 
 1. **Delayed Jobs**: Moves jobs from sorted set to work queue when their time arrives
 2. **Cron Jobs**: Parses cron expressions, calculates next run, enqueues jobs
 
-### Repositories (`internal/repository/`)
+### Repositories (`pkg/repository/`)
 
 PostgreSQL persistence:
 
@@ -77,7 +77,7 @@ PostgreSQL persistence:
 - **Execution Repository**: Job execution history with timing and error details
 - **Schedule Repository**: Cron job definitions
 
-### API Handler (`internal/handler/`)
+### API Handler (`pkg/handler/`)
 
 REST endpoints:
 

@@ -14,7 +14,7 @@ go get github.com/abdul-hamid-achik/job-queue
 
 ```go
 import (
-    "github.com/abdul-hamid-achik/job-queue/internal/broker"
+    "github.com/abdul-hamid-achik/job-queue/pkg/broker"
     "github.com/redis/go-redis/v9"
 )
 
@@ -27,7 +27,7 @@ b := broker.NewRedisStreamsBroker(redisClient)
 ### 2. Create and Enqueue Jobs
 
 ```go
-import "github.com/abdul-hamid-achik/job-queue/internal/job"
+import "github.com/abdul-hamid-achik/job-queue/pkg/job"
 
 // Simple job
 j, err := job.New("email.send", map[string]string{
@@ -55,7 +55,7 @@ b.Enqueue(ctx, j)
 ### 3. Register Handlers
 
 ```go
-import "github.com/abdul-hamid-achik/job-queue/internal/worker"
+import "github.com/abdul-hamid-achik/job-queue/pkg/worker"
 
 registry := worker.NewRegistry()
 
@@ -73,7 +73,7 @@ registry.MustRegister("payment.process", processPayment)
 ### 4. Add Middleware
 
 ```go
-import "github.com/abdul-hamid-achik/job-queue/internal/middleware"
+import "github.com/abdul-hamid-achik/job-queue/pkg/middleware"
 
 registry.Use(
     middleware.RecoveryMiddleware(logger),    // Catch panics
